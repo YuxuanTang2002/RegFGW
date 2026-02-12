@@ -21,7 +21,7 @@ def main():
     builder = FGWBuilder(FGWBuildParams())
 
     scorer = FGWScorer(builder, FGWScoreParams(
-        alpha=0.5,
+        alpha=0.3,
         n_starts=30,
         init_seed=0,
     ))
