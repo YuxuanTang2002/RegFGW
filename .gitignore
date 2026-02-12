@@ -1,0 +1,28 @@
+# IDE
+.idea/
+
+# virtual environments
+fgw_venv/
+venv/
+.env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# build artifacts
+build/
+dist/
+*.egg-info/
+
+# results / outputs
+results/
+
+# logs & temp
+*.log
+*.tmp
+
+# Jupyter
+.ipynb_checkpoints/

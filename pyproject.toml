@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "regfgw"
+version = "0.1.0"
+description = "Pre-screening of interface registry via graph-based FGW distance and Bayesian optimization"
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+  "numpy>=1.23",
+  "scipy>=1.10",
+  "scikit-learn>=1.2",
+  "pymatgen>=2023.0",
+  "ase>=3.22",
+  "networkx>=3.0",
+  "pandas>=1.5",
+  "POT>=0.9",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
