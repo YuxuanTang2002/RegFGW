@@ -8,6 +8,8 @@ from pymatgen.core import Lattice
 from pymatgen.core.surface import get_symmetrically_distinct_miller_indices
 from pymatgen.analysis.interfaces.zsl import ZSLGenerator, vec_area
 from pymatgen.analysis.interfaces.coherent_interfaces import CoherentInterfaceBuilder
+from pymatgen.io.ase import AseAtomsAdaptor
+from .structure_to_graph import GraphEncoder
 
 # -----------------------------------------------------------------------------
 # Parameter containers
@@ -25,7 +27,7 @@ class ZSLParams:
     max_length_tol: Relative tolerance for matching in-plane lattice vector lengths
     max_angle_tol: Absolute tolerance for matching in-plane lattice vector angles
     """
-    max_area: float = 175.0
+    max_area: float = 150.0
     max_area_ratio_tol: float = 0.09
     max_length_tol: float = 0.03
     max_angle_tol: float = 0.01
@@ -338,6 +340,8 @@ class InterfaceBuilder:
         * area: Å^2
         * substrate_bulk(optional): Structure
         * film_bulk(Optional): Structure
+        * sub_period_layers / film_period_layers: int: the number of z-coplanar atomic layers
+        comprising one minimal stacking repeat period along the surface normal
         """
         cib = self.build_cib(substrate_miller=substrate_miller, film_miller=film_miller)
 
@@ -357,6 +361,31 @@ class InterfaceBuilder:
         records = []
 
         for i, (itf, area) in enumerate(itfs):
+            sub_atoms = AseAtomsAdaptor.get_atoms(itf.substrate)
+            film_atoms = AseAtomsAdaptor.get_atoms(itf.film)
+            n_sub_layers = len(GraphEncoder.cluster_layers_by_z(sub_atoms))
+            n_film_layers = len(GraphEncoder.cluster_layers_by_z(film_atoms))
+            sl = int(self.interface_params.substrate_layers)
+            fl = int(self.interface_params.film_layers)
+            sub_ratio = n_sub_layers / float(sl)
+            film_ratio = n_film_layers / float(fl)
+            sub_period_layers = int(round(sub_ratio))
+            film_period_layers = int(round(film_ratio))
+            # strict stacking consistency check (no rumpling allowed
+            if abs(sub_ratio - sub_period_layers) > 1e-6:
+                raise RuntimeError(
+                    f"Substrate stacking inconsistency detected: "
+                    f"n_sub_layers={n_sub_layers}, sub_layers={sl}, "
+                    f"ratio={sub_ratio:.6f} (non-integer). "
+                    f"Rumbling or structural distortion not supported."
+                )
+            if abs(film_ratio - film_period_layers) > 1e-6:
+                raise RuntimeError(
+                    f"Film stacking inconsistency detected: "
+                    f"n_film_layers={n_film_layers}, film_layers={fl}, "
+                    f"ratio={film_ratio:.6f} (non-integer). "
+                    f"Rumbling or structural distortion not supported."
+                )
             records.append({
                 "substrate_miller": substrate_miller,
                 "film_miller": film_miller,
@@ -367,6 +396,8 @@ class InterfaceBuilder:
                 "area": area,
                 "substrate_bulk": None,
                 "film_bulk": None,
+                "sub_period_layers": sub_period_layers,
+                "film_period_layers": film_period_layers,
             })
 
         if build_bulk_refs:
@@ -401,11 +432,10 @@ class InterfaceBuilder:
             os.makedirs(out_dir, exist_ok=True)
             s = records[0]["substrate_miller"]
             f = records[0]["film_miller"]
-            t = records[0]["termination"]
+            f_t, s_t = records[0]["termination"]
             g = records[0]["gap"]
             sub_tag = f"{s[0]}{s[1]}{s[2]}"
             film_tag = f"{f[0]}{f[1]}{f[2]}"
-            f_t, s_t = t
             f_t = f_t.replace("/", "-")
             s_t = s_t.replace("/", "-")
             term_tag = f"{s_t}_{f_t}"

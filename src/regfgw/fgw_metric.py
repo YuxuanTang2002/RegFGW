@@ -125,7 +125,7 @@ class FGWBuilder:
         c2 = self.extract_structure_matrix(g_bulk)
         x1 = self.extract_feature_matrix(g_itf)
         x2 = self.extract_feature_matrix(g_bulk)
-        m = cdist(x1, x2, metric=self.params.feature_metric)
+        m = cdist(x1, x2, metric=self.params.feature_metric) # type: ignore[arg-type]
         p = self.extract_mass_matrix(g_itf)
         q = self.extract_mass_matrix(g_bulk)
         return FGWInputs(M=m, C1=c1, C2=c2, p=p, q=q)
