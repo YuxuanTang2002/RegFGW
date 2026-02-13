@@ -1,6 +1,5 @@
 import argparse
 from pymatgen.core import Structure
-from tqdm import tqdm
 from regfgw.interface_construction import InterfaceBuilder, ZSLParams, InterfaceParams
 from regfgw.structure_to_graph import GraphEncoder
 from regfgw.fgw_metric import FGWBuilder, FGWBuildParams, FGWScorer, FGWScoreParams
@@ -70,6 +69,7 @@ def main():
         build_bulk_refs=True,
         structure_check=args.structure_check,
     )
+    print(f"[Note] {len(records)} interface candidates are built.")
 
     if not records:
         raise RuntimeError("No valid interface candidates generated.")
@@ -106,7 +106,7 @@ def main():
     # BO for each interface candidate
     # -------------------------------------------------------------------------
 
-    for interface in tqdm(records, desc="Computing interface registries"):
+    for interface in records:
         best_record, _ = bo.bayes_optimize_registry(
             interface,
             out_best=args.out_best,
