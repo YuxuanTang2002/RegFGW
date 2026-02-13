@@ -40,12 +40,10 @@ class InterfaceParams:
     Attributes
     ----------
     film_layers, substrate_layers: Slab thickness controls. One layer corresponds to the minimum stacking repeat period.
-    gap: float or None. If None, interfacial gap is the sum the maximum vdw radii of the atoms on both sides.
     vacuum: Vacuum thickness above film slab(Å)
     """
     film_layers: int = 3
     substrate_layers: int = 3
-    gap: None | float = None
     vacuum: float = 20.0
 
 # -----------------------------------------------------------------------------
@@ -230,10 +228,7 @@ class InterfaceBuilder:
         if substrate_layers is None:
             substrate_layers = self.interface_params.substrate_layers
 
-        gap = self.interface_params.gap
-
-        if gap is None:
-            gap = self.gap_from_term(term)
+        gap = self.gap_from_term(term)
 
         interfaces = cib.get_interfaces(
             term,
@@ -353,10 +348,7 @@ class InterfaceBuilder:
         if not itfs:
             return None
 
-        gap = self.interface_params.gap
-
-        if gap is None:
-            gap = self.gap_from_term(term)
+        gap = self.gap_from_term(term)
 
         records = []
 
