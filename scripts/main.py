@@ -17,7 +17,7 @@ def main():
     p.add_argument("--substrate-layers", type=int, default=3)
     p.add_argument("--vacuum", type=float, default=20.0)
     # ZSL tolerances
-    p.add_argument("--zsl-max-area", type=float, default=30.0)
+    p.add_argument("--zsl-max-area", type=float, default=150.0)
     p.add_argument("--zsl-area-ratio", type=float, default=0.09)
     p.add_argument("--zsl-length", type=float, default=0.03)
     p.add_argument("--zsl-angle", type=float, default=0.01)
