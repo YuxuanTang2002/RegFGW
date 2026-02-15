@@ -318,6 +318,8 @@ class RegistryPriorBO:
         best_record: BORecord
         records: List[BORecord], full optimization trajectory
         """
+        self.g_sub_bulk = None
+        self.g_film_bulk = None
         rng = np.random.default_rng(self.params.seed)
         records: List[BORecord] = []
         best_record: Optional[BORecord] = None
@@ -331,8 +333,8 @@ class RegistryPriorBO:
             pdf = norm.pdf(z)
             return (best-mu-xi) * cdf + sigma * pdf
 
-        _, _ = self.score_registry(interface, structure_check=self.structure_check)
         shift_c = self.suggest_shift_c_interval(interface)
+        _, _ = self.score_registry(interface, shift_c=shift_c, structure_check=self.structure_check)
 
         # Random initialization
         for i in range(self.params.n_init):
