@@ -5,6 +5,7 @@ from typing import Dict, Any, List, Optional
 from pymatgen.core.interface import Interface
 from pymatgen.io.ase import AseAtomsAdaptor
 from ase import  Atoms
+from tqdm import tqdm
 from ase.io import write
 from ase.io.trajectory import Trajectory
 from ase.data import covalent_radii, vdw_radii
@@ -360,7 +361,7 @@ class RegistryPriorBO:
         gp = GaussianProcessRegressor(kernel=kernel, normalize_y=True, random_state=self.params.seed, alpha=1e-6)
 
         # BO refinement loop
-        for i in range(self.params.n_iter):
+        for _ in tqdm(range(self.params.n_iter), desc="BO refinement"):
             x_array = np.asarray(x, dtype=float)
             y_array = np.asarray(y, dtype=float)
             mask = np.isfinite(y_array) & (y_array < self.params.penalty * 0.5)

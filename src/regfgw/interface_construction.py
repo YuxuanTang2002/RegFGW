@@ -1,6 +1,7 @@
 import os
 import re
 import numpy as np
+from numpy.linalg import LinAlgError
 from dataclasses import dataclass
 from ase.data import atomic_numbers, vdw_radii
 from pymatgen.core import Structure
@@ -230,12 +231,20 @@ class InterfaceBuilder:
 
         gap = self.gap_from_term(term)
 
-        interfaces = cib.get_interfaces(
-            term,
-            gap=gap,
-            vacuum_over_film=self.interface_params.vacuum,
-            substrate_thickness=substrate_layers,
-            film_thickness=film_layers,)
+        try:
+            interfaces = list(cib.get_interfaces(
+                term,
+                gap=gap,
+                vacuum_over_film=self.interface_params.vacuum,
+                substrate_thickness=substrate_layers,
+                film_thickness=film_layers,
+            ))
+        except LinAlgError as e:
+            print(
+                "[WARN] Skipping interface candidates due to LinAlgError (likely singular supercell transform). "
+                f"{type(e).__name__}: {e}"
+            )
+            return []
 
         return interfaces
 
@@ -260,58 +269,6 @@ class InterfaceBuilder:
             candidates.append((itf, float(area)))
 
         return candidates
-
-    # -------------------------------------------------------------------------
-    # Thickness matching heuristics to build bulk references
-    # -------------------------------------------------------------------------
-
-    def find_best_film_layers(self, cib: CoherentInterfaceBuilder, term, t_target: float,
-                             sub_layers: int, film_layers_start: int, film_layers_stop: int):
-        """
-        Choose film slab thickness (layers) such that film z-thickness ~ t_target.
-
-        Notes
-        -----
-        The first candidate in each layer setting is used to estimate thickness.
-        """
-        best_fl = film_layers_start
-        best_err = None
-
-        for fl in range(film_layers_start, film_layers_stop+1):
-            candidates = self.collect_candidates(cib, term, film_layers=fl, substrate_layers=sub_layers)
-
-            if not candidates:
-                continue
-
-            itf = candidates[0][0]
-            t_film = self.extract_thickness(itf.film)
-            err = abs(t_film - t_target)
-            if best_err is None or err < best_err:
-                best_err = err
-                best_fl = fl
-
-        return best_fl
-
-    def find_best_sub_layers(self, cib: CoherentInterfaceBuilder, term, t_target: float,
-                             film_layers: int, sub_layers_start: int, sub_layers_stop: int):
-        """Choose substrate slab thickness (layers) such that substrate z-thickness ~ t_target."""
-        best_sl = sub_layers_start
-        best_err = None
-
-        for sl in range(sub_layers_start, sub_layers_stop+1):
-            candidates = self.collect_candidates(cib, term, film_layers=film_layers, substrate_layers=sl)
-
-            if not candidates:
-                continue
-
-            itf = candidates[0][0]
-            t_sub = self.extract_thickness(itf.substrate)
-            err = abs(t_sub - t_target)
-            if best_err is None or err < best_err:
-                best_err = err
-                best_sl = sl
-
-        return best_sl
 
     # -------------------------------------------------------------------------
     # Public API
@@ -395,19 +352,9 @@ class InterfaceBuilder:
         if build_bulk_refs:
             # Use the first candidate as a representative to set a target thickness.
             itf0 = itfs[0][0]
-            t_target = self.extract_thickness(itf0)
             fl0 = self.interface_params.film_layers
             sl0 = self.interface_params.substrate_layers
-            layers_search_stop = 3 * (fl0 + sl0)
-            best_fl = self.find_best_film_layers(
-                cib, term, t_target,
-                sub_layers=sl0, film_layers_start=fl0, film_layers_stop=layers_search_stop,
-            )
-            best_sl = self.find_best_sub_layers(
-                cib, term, t_target,
-                film_layers=fl0, sub_layers_start=sl0, sub_layers_stop=layers_search_stop,
-            )
-            itf_refs = self.collect_candidates(cib, term, film_layers=best_fl, substrate_layers=best_sl)
+            itf_refs = self.collect_candidates(cib, term, film_layers=(fl0+sl0), substrate_layers=(fl0+sl0))
             # Expect the same number of candidates if only changing the layer thickness.
             if len(itf_refs) != len(itfs):
                 raise RuntimeError(f"Candidate count mismatch: itfs={len(itfs)}, itf_refs={len(itf_refs)}")
@@ -452,7 +399,7 @@ class InterfaceBuilder:
 
         return records
 
-    def sum_interface_records(self, build_bulk_refs=True, structure_check=False):
+    def sum_interface_records(self, build_bulk_refs=False, structure_check=False):
         """
         Enumerate all (substrate_miller, film_miller, termination) combinations and aggregate candidate records.
 

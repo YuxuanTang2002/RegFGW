@@ -13,18 +13,18 @@ def main():
     p.add_argument("--embedding", required=True, help="element embedding file")
     # Interface construction
     p.add_argument("--max-miller", type=int, default=1)
-    p.add_argument("--film-layers", type=int, default=3)
-    p.add_argument("--substrate-layers", type=int, default=3)
+    p.add_argument("--film-layers", type=int, default=1)
+    p.add_argument("--substrate-layers", type=int, default=1)
     p.add_argument("--vacuum", type=float, default=20.0)
     # ZSL tolerances
-    p.add_argument("--zsl-max-area", type=float, default=150.0)
-    p.add_argument("--zsl-area-ratio", type=float, default=0.09)
+    p.add_argument("--zsl-max-area", type=float, default=120.0)
+    p.add_argument("--zsl-area-ratio", type=float, default=0.06)
     p.add_argument("--zsl-length", type=float, default=0.03)
-    p.add_argument("--zsl-angle", type=float, default=0.01)
+    p.add_argument("--zsl-angle", type=float, default=0.02)
     # FGW settings
     p.add_argument("--fgw-metric", type=str, default="euclidean")
     p.add_argument("--fgw-alpha", type=float, default=0.5)
-    p.add_argument("--fgw-n-starts", type=int, default=80)
+    p.add_argument("--fgw-n-starts", type=int, default=60)
     p.add_argument("--fgw-seed", type=int, default=0)
     # BO settings
     p.add_argument("--bo-n-init", type=int, default=25)
