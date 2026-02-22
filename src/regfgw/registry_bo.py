@@ -1,5 +1,11 @@
 import copy
 import numpy as np
+import warnings
+from sklearn.exceptions import ConvergenceWarning
+
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+
 from dataclasses import dataclass
 from typing import Dict, Any, List, Optional
 from pymatgen.core.interface import Interface
@@ -48,9 +54,9 @@ class BOParams:
     xi: exploration parameter in expected improvement(ei)
     penalty: Large penalty assigned to geometrically invalid registries
     """
-    n_init: int = 25
-    n_iter: int = 75
-    acq_candidates: int = 4000
+    n_init: int = 20
+    n_iter: int = 60
+    acq_candidates: int = 1500
     seed: int = 0
     xi: float = 0.01
     penalty: float = 1e6
@@ -129,7 +135,7 @@ class RegistryPriorBO:
 
         check:
         1) No interatomic distance smaller than covalent radius sum (avoid atomic overlap)
-        2) At least one interfacial atom pair within van der Waals range
+        2) Sufficient interfacial contact within van der Waals range
 
         Returns
         -------
@@ -138,8 +144,8 @@ class RegistryPriorBO:
         c_all = np.array([s.coords[2] for s in itf.sites], dtype=float)
         sub_c_max = float(np.max(c_all[itf.substrate_indices]))
         film_c_min = float(np.min(c_all[itf.film_indices]))
-        sub_indices = [i for i in itf.substrate_indices if (sub_c_max - c_all[i]) <= 6.0]
-        film_indices = [j for j in itf.film_indices if (c_all[j] - film_c_min) <= 6.0]
+        sub_indices = [i for i in itf.substrate_indices if (sub_c_max - c_all[i]) <= 3.0]
+        film_indices = [j for j in itf.film_indices if (c_all[j] - film_c_min) <= 3.0]
 
         if not sub_indices or not film_indices:
             raise ValueError("No atoms in interface window")
@@ -173,10 +179,12 @@ class RegistryPriorBO:
             for b, j in enumerate(film_indices):
                 d[a, b] = float(itf.get_distance(i, j))
 
-        if np.any(d < cov_sum):
+        if np.any(d < (cov_sum-0.1)):
             return False
 
-        if np.all(d > vdw_sum):
+        n_contact = int(np.count_nonzero(d <= (vdw_sum+0.2)))
+
+        if n_contact < 10:
             return False
 
         return True
@@ -256,31 +264,36 @@ class RegistryPriorBO:
         base_itf = interface["interface"]
         first_true = None
         last_true = None
+        scan_grid = [-i * 0.1 for i in range(51)]
 
-        for i in range(51):
-            shift_c = -i * 0.1
-            itf_try = self.shift_film(base_itf, shift_c=float(shift_c))
-            if self.check_registry_continuity(itf_try):
-                if first_true is None:
-                    first_true = float(shift_c)
-                last_true = float(shift_c)
-            else:
-                if first_true is not None:
-                    break
+        with tqdm(total=(len(scan_grid)*2), desc="Gap scanning") as pbar:
+            # Stage 1: continuity scanning
+            for shift_c in scan_grid:
+                itf_try = self.shift_film(base_itf, shift_c=float(shift_c))
+                if self.check_registry_continuity(itf_try):
+                    if first_true is None:
+                        first_true = float(shift_c)
+                    last_true = float(shift_c)
+                    pbar.set_postfix(hi=first_true, lo=last_true)
+                else:
+                    if first_true is not None:
+                        break
+                pbar.update(1)
+            if first_true is None:
+                raise RuntimeError(
+                    "No feasible shift_c found"
+                    "Interface geometrically incompatible with current physical constraints"
+                )
+            # Stage 2: gap scoring
+            pbar.set_description("Gap scoring")
+            c_range = np.arange(last_true, first_true + 1e-6, 0.1, dtype=float)
+            scores = np.empty_like(c_range, dtype=float)
+            for i, shift_c in enumerate(map(float, c_range)):
+                score, _ = self.score_registry(interface, shift_c=shift_c)
+                scores[i] = score
+                pbar.update(1)
 
-        if first_true is None:
-            raise RuntimeError(
-                "No feasible shift_c found" 
-                "Interface geometrically incompatible with current physical constraints"
-            )
-
-        c_range = np.arange(last_true, first_true+1e-6, 0.1, dtype=float)
-        scores = np.empty_like(c_range, dtype=float)
-
-        for i, shift_c in enumerate(map(float, c_range)):
-            score, _ = self.score_registry(interface, shift_c=shift_c)
-            scores[i] = score
-
+        # moving average
         if len(c_range) < 3:
             best_idx = int(np.nanargmin(scores))
             sug_c_min = sug_c_max = c_range[best_idx]
@@ -290,6 +303,7 @@ class RegistryPriorBO:
             sug_c_min, sug_c_max = c_range[best_idx], c_range[best_idx+2]
 
         shift_c = 0.5 * (sug_c_min + sug_c_max)
+        tqdm.write(f"Suggested shift_c: {shift_c:.6f}Å")
 
         return float(shift_c)
 
@@ -335,57 +349,79 @@ class RegistryPriorBO:
             return (best-mu-xi) * cdf + sigma * pdf
 
         shift_c = self.suggest_shift_c_interval(interface)
-        _, _ = self.score_registry(interface, shift_c=shift_c, structure_check=self.structure_check)
 
-        # Random initialization
-        for i in range(self.params.n_init):
-            shift_a = float(rng.uniform(0.0, 1.0))
-            shift_b = float(rng.uniform(0.0, 1.0))
-            score, reg = self.score_registry(interface, shift_a=shift_a, shift_b=shift_b, shift_c=shift_c)
-            step = len(records)
-            record = BORecord(step=step, score=score, registry=reg)
-            records.append(record)
-            x.append([shift_a, shift_b])
-            y.append(score if np.isfinite(score) else self.params.penalty)
-            if np.isfinite(score) and (best_record is None or score < best_record.score):
-                best_record = record
+        if self.structure_check:
+            self.g_sub_bulk = None
+            self.g_film_bulk = None
+            self.score_registry(interface, shift_c=shift_c, structure_check=True)
 
-        if best_record is None:
-            raise RuntimeError(
-                "All initial samples failed (score=inf)." 
-                "No registry passed check_registry_continuity, BO cannot proceed."
-            )
+        total_steps = self.params.n_init + self.params.n_iter
 
-        # Gaussian Process surrogate
-        kernel = ConstantKernel(1.0, (1e-3, 1e3)) * Matern(length_scale=0.2, length_scale_bounds=(1e-3, 1e2), nu=2.5)
-        gp = GaussianProcessRegressor(kernel=kernel, normalize_y=True, random_state=self.params.seed, alpha=1e-6)
-
-        # BO refinement loop
-        for _ in tqdm(range(self.params.n_iter), desc="BO refinement"):
-            x_array = np.asarray(x, dtype=float)
-            y_array = np.asarray(y, dtype=float)
-            mask = np.isfinite(y_array) & (y_array < self.params.penalty * 0.5)
-            if np.count_nonzero(mask) < 3:
-                gp.fit(x_array, y_array)
-            else:
-                gp.fit(x_array[mask], y_array[mask])
-            cand_a = rng.uniform(0.0, 1.0, size=self.params.acq_candidates)
-            cand_b = rng.uniform(0.0, 1.0, size=self.params.acq_candidates)
-            x_cand = np.stack([cand_a,cand_b], axis=1)
-            y_mu, y_sigma = gp.predict(x_cand, return_std=True)
-            y_best = float(np.min(y_array))
-            ei = evaluate_expected_improvement(y_mu, y_sigma, y_best, float(self.params.xi))
-            best_idx = int(np.argmax(ei))
-            shift_a = float(x_cand[best_idx, 0])
-            shift_b = float(x_cand[best_idx, 1])
-            score, reg = self.score_registry(interface, shift_a=shift_a, shift_b=shift_b, shift_c=shift_c)
-            step = len(records)
-            record = BORecord(step=step, score=score, registry=reg)
-            records.append(record)
-            x.append([shift_a, shift_b])
-            y.append(score if np.isfinite(score) else self.params.penalty)
-            if np.isfinite(score) and (best_record is None or score < best_record.score):
-                best_record = record
+        with tqdm(total=total_steps, desc="BO initialization") as pbar:
+            # Random initialization
+            for _ in range(self.params.n_init):
+                shift_a = float(rng.uniform(0.0, 1.0))
+                shift_b = float(rng.uniform(0.0, 1.0))
+                score, reg = self.score_registry(interface, shift_a=shift_a, shift_b=shift_b, shift_c=shift_c)
+                step = len(records)
+                record = BORecord(step=step, score=score, registry=reg)
+                records.append(record)
+                x.append([shift_a, shift_b])
+                y.append(score if np.isfinite(score) else self.params.penalty)
+                if np.isfinite(score) and (best_record is None or score < best_record.score):
+                    best_record = record
+                if best_record is not None:
+                    pbar.set_postfix(best=f"{best_record.score:.6g}")
+                pbar.update(1)
+            if best_record is None:
+                raise RuntimeError(
+                    "All initial samples failed (score=inf)."
+                    "No registry passed check_registry_continuity, BO cannot proceed."
+                )
+            pbar.set_description("BO refinement")
+            # Gaussian Process surrogate
+            kernel = ConstantKernel(1.0, (1e-3, 1e3)) * Matern(length_scale=0.2, length_scale_bounds=(1e-3, 1e2), nu=2.5)
+            gp = GaussianProcessRegressor(kernel=kernel, normalize_y=True, random_state=self.params.seed, alpha=1e-6)
+            # BO refinement loop
+            refine_finite = False
+            for _ in range(self.params.n_iter):
+                x_array = np.asarray(x, dtype=float)
+                y_array = np.asarray(y, dtype=float)
+                mask = np.isfinite(y_array) & (y_array < self.params.penalty * 0.5)
+                if np.count_nonzero(mask) < 3:
+                    raise RuntimeError(
+                        "Too few valid registries to fit GP model. "
+                        "Registry space likely dominated by invalid configureations."
+                    )
+                else:
+                    gp.fit(x_array[mask], y_array[mask])
+                cand_a = rng.uniform(0.0, 1.0, size=self.params.acq_candidates)
+                cand_b = rng.uniform(0.0, 1.0, size=self.params.acq_candidates)
+                x_cand = np.stack([cand_a, cand_b], axis=1)
+                y_mu, y_sigma = gp.predict(x_cand, return_std=True)
+                y_best = float(np.min(y_array))
+                ei = evaluate_expected_improvement(y_mu, y_sigma, y_best, float(self.params.xi))
+                best_idx = int(np.argmax(ei))
+                shift_a = float(x_cand[best_idx, 0])
+                shift_b = float(x_cand[best_idx, 1])
+                score, reg = self.score_registry(interface, shift_a=shift_a, shift_b=shift_b, shift_c=shift_c)
+                step = len(records)
+                record = BORecord(step=step, score=score, registry=reg)
+                records.append(record)
+                x.append([shift_a, shift_b])
+                y.append(score if np.isfinite(score) else self.params.penalty)
+                if np.isfinite(score):
+                    refine_finite = True
+                    if best_record is None or score < best_record.score:
+                        best_record = record
+                if best_record is not None:
+                    pbar.set_postfix(best=f"{best_record.score:.6g}")
+                pbar.update(1)
+            if not refine_finite:
+                raise RuntimeError(
+                    "All refinement samples failed (score=inf)."
+                    "No registry passed check_registry_continuity, BO cannot proceed."
+                )
 
         # Optional structure output
         if out_best:

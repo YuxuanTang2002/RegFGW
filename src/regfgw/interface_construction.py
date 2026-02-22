@@ -10,6 +10,8 @@ from pymatgen.core.surface import get_symmetrically_distinct_miller_indices
 from pymatgen.analysis.interfaces.zsl import ZSLGenerator, vec_area
 from pymatgen.analysis.interfaces.coherent_interfaces import CoherentInterfaceBuilder
 from pymatgen.io.ase import AseAtomsAdaptor
+from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
+
 from .structure_to_graph import GraphEncoder
 
 # -----------------------------------------------------------------------------
@@ -28,10 +30,10 @@ class ZSLParams:
     max_length_tol: Relative tolerance for matching in-plane lattice vector lengths
     max_angle_tol: Absolute tolerance for matching in-plane lattice vector angles
     """
-    max_area: float = 150.0
-    max_area_ratio_tol: float = 0.09
+    max_area: float = 175.0
+    max_area_ratio_tol: float = 0.06
     max_length_tol: float = 0.03
-    max_angle_tol: float = 0.01
+    max_angle_tol: float = 0.02
 
 @dataclass(frozen=True)
 class InterfaceParams:
@@ -77,8 +79,8 @@ class InterfaceBuilder:
         zsl_params: ZSL lattice matching tolerances
         interface_params: Slab thickness, gap and vacuum used for interface construction
         """
-        self.substrate = substrate
-        self.film = film
+        self.substrate = self.standarize_struct(substrate)
+        self.film = self.standarize_struct(film)
         self.max_miller_idx = max_miller_idx
         self.zsl_params = zsl_params
         self.interface_params = interface_params
@@ -98,6 +100,19 @@ class InterfaceBuilder:
     # -------------------------------------------------------------------------
     # Geometry utilities
     # -------------------------------------------------------------------------
+
+    @staticmethod
+    def standarize_struct(struct: Structure):
+        try:
+            sga = SpacegroupAnalyzer(struct, symprec=1e-2, angle_tolerance=5.0)
+            std = sga.get_conventional_standard_structure()
+            if std is None:
+                print("[WARN] spglib standarization returned None. Proceeding with original structure.")
+                return struct
+            return std
+        except Exception as e:
+            print(f"[WARN] spalib standarization raised {type(e).__name__}: {e}. Proceeding with original structure.")
+            return struct
 
     @staticmethod
     def interface_area(interface: Structure):
@@ -351,7 +366,6 @@ class InterfaceBuilder:
 
         if build_bulk_refs:
             # Use the first candidate as a representative to set a target thickness.
-            itf0 = itfs[0][0]
             fl0 = self.interface_params.film_layers
             sl0 = self.interface_params.substrate_layers
             itf_refs = self.collect_candidates(cib, term, film_layers=(fl0+sl0), substrate_layers=(fl0+sl0))

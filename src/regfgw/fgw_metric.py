@@ -153,7 +153,7 @@ class FGWScoreParams:
     tol_abs: float = 1e-9
     armijo: bool = True
     log: bool = False
-    n_starts: int = 1
+    n_starts: int = 80
     init_seed: int = 0
     init_ipfp_tol: float = 1e-10
     init_ipfp_max_iter: int = 1000
