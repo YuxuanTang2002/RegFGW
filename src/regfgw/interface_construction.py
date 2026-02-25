@@ -1,17 +1,15 @@
 import os
-import re
 import numpy as np
 from numpy.linalg import LinAlgError
 from dataclasses import dataclass
-from ase.data import atomic_numbers, vdw_radii
 from pymatgen.core import Structure
 from pymatgen.core import Lattice
 from pymatgen.core.surface import get_symmetrically_distinct_miller_indices
+from pymatgen.core.interface import Interface
 from pymatgen.analysis.interfaces.zsl import ZSLGenerator, vec_area
 from pymatgen.analysis.interfaces.coherent_interfaces import CoherentInterfaceBuilder
 from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
-
 from .structure_to_graph import GraphEncoder
 
 # -----------------------------------------------------------------------------
@@ -30,7 +28,7 @@ class ZSLParams:
     max_length_tol: Relative tolerance for matching in-plane lattice vector lengths
     max_angle_tol: Absolute tolerance for matching in-plane lattice vector angles
     """
-    max_area: float = 175.0
+    max_area: float = 150.0
     max_area_ratio_tol: float = 0.06
     max_length_tol: float = 0.03
     max_angle_tol: float = 0.02
@@ -47,6 +45,7 @@ class InterfaceParams:
     """
     film_layers: int = 3
     substrate_layers: int = 3
+    gap: float = 5.0
     vacuum: float = 20.0
 
 # -----------------------------------------------------------------------------
@@ -157,44 +156,6 @@ class InterfaceBuilder:
             coords_are_cartesian=True
         )
 
-    # -----------------------------------------------------------------------------
-    # Gap determination
-    # -----------------------------------------------------------------------------
-
-    @staticmethod
-    def gap_from_term(term):
-        """
-        Compute a conservative interfacial gap (Å) from a (film_term, sub_term) termination pair.
-        gap = max_r(film) + max_r(substrate), where radii are ASE vdw radii.
-        """
-        def max_r_from_term(t):
-            symbol = str(t).split("_", 1)[0]
-            elements = []
-
-            for e in re.findall(r"[A-Z][a-z]?", symbol):
-                if e in atomic_numbers:
-                    elements.append(e)
-
-            if not elements:
-                raise RuntimeError(f"Failed to parse elements from termination {t}")
-
-            radii = []
-
-            for e in elements:
-                r = float(vdw_radii[atomic_numbers[e]])
-                if r is None or r < 1e-6:
-                    raise RuntimeError(f"ASE vdw radius not available for element {e}")
-                radii.append(r)
-
-            return max(radii)
-
-        f_term, s_term = term
-        r_f = max_r_from_term(f_term)
-        r_s = max_r_from_term(s_term)
-        gap = r_f + r_s
-
-        return gap
-
     # -------------------------------------------------------------------------
     # CIB construction
     # -------------------------------------------------------------------------
@@ -244,7 +205,7 @@ class InterfaceBuilder:
         if substrate_layers is None:
             substrate_layers = self.interface_params.substrate_layers
 
-        gap = self.gap_from_term(term)
+        gap = self.interface_params.gap
 
         try:
             interfaces = list(cib.get_interfaces(
@@ -286,15 +247,55 @@ class InterfaceBuilder:
         return candidates
 
     # -------------------------------------------------------------------------
+    # Flip enumeration
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def neg_miller(m):
+        return tuple(int(-i) for i in m)
+
+    @staticmethod
+    def mirror_along_normal(f, indices: list[int]):
+        """Return new frac_coords with selected indices mirrored along c about the mid-plane."""
+        fc = f[indices, 2]
+        fc_mid = 0.5 * (float(fc.min()) + float(fc.max()))
+        f[indices, 2] = 2.0 * fc_mid - fc
+        return f
+
+    def flip_interface(self, itf: Interface, flip_sub=False, flip_film=False):
+        """Rebuild a new Interface object after flipping substrate or/and film."""
+        f = np.array(itf.frac_coords, dtype=float, copy=True)
+
+        if flip_sub:
+            f = self.mirror_along_normal(f, itf.substrate_indices)
+
+        if flip_film:
+            f =  self.mirror_along_normal(f, itf.film_indices)
+
+        f[:, :2] = f[:, :2] % 1.0
+
+        return Interface(
+            lattice=itf.lattice,
+            species=itf.species,
+            coords=f,
+            coords_are_cartesian=False,
+            site_properties=itf.site_properties,
+            gap=itf.gap,
+            vacuum_over_film=itf.vacuum_over_film,
+        )
+
+    # -------------------------------------------------------------------------
     # Public API
     # -------------------------------------------------------------------------
 
     def get_interface_records(
             self, substrate_miller, film_miller, term,
             build_bulk_refs=True, structure_check=False,
+            cib: CoherentInterfaceBuilder | None = None,
     ):
         """
         Build full candidate records for a given (substrate_miller, film_miller, termination).
+        Enumerate flips tp avoid missing termination combinations.
 
         Returns
         -------
@@ -310,7 +311,8 @@ class InterfaceBuilder:
         * sub_period_layers / film_period_layers: int: the number of z-coplanar atomic layers
         comprising one minimal stacking repeat period along the surface normal
         """
-        cib = self.build_cib(substrate_miller=substrate_miller, film_miller=film_miller)
+        if cib is None:
+            cib = self.build_cib(substrate_miller=substrate_miller, film_miller=film_miller)
 
         if cib is None:
             return None
@@ -320,49 +322,55 @@ class InterfaceBuilder:
         if not itfs:
             return None
 
-        gap = self.gap_from_term(term)
-
         records = []
+        # Enumerate flip variants.
+        flip_specs = [
+            (False, False, substrate_miller, film_miller),
+            (True, False, self.neg_miller(substrate_miller), film_miller),
+            (False, True, substrate_miller, self.neg_miller(film_miller)),
+            (True, True, self.neg_miller(substrate_miller), self.neg_miller(film_miller)),
+        ]
 
         for i, (itf, area) in enumerate(itfs):
-            sub_atoms = AseAtomsAdaptor.get_atoms(itf.substrate)
-            film_atoms = AseAtomsAdaptor.get_atoms(itf.film)
-            n_sub_layers = len(GraphEncoder.cluster_layers_by_z(sub_atoms))
-            n_film_layers = len(GraphEncoder.cluster_layers_by_z(film_atoms))
-            sl = int(self.interface_params.substrate_layers)
-            fl = int(self.interface_params.film_layers)
-            sub_ratio = n_sub_layers / float(sl)
-            film_ratio = n_film_layers / float(fl)
-            sub_period_layers = int(round(sub_ratio))
-            film_period_layers = int(round(film_ratio))
-            # strict stacking consistency check (no rumpling allowed
-            if abs(sub_ratio - sub_period_layers) > 1e-6:
-                raise RuntimeError(
-                    f"Substrate stacking inconsistency detected: "
-                    f"n_sub_layers={n_sub_layers}, sub_layers={sl}, "
-                    f"ratio={sub_ratio:.6f} (non-integer). "
-                    f"Rumbling or structural distortion not supported."
-                )
-            if abs(film_ratio - film_period_layers) > 1e-6:
-                raise RuntimeError(
-                    f"Film stacking inconsistency detected: "
-                    f"n_film_layers={n_film_layers}, film_layers={fl}, "
-                    f"ratio={film_ratio:.6f} (non-integer). "
-                    f"Rumbling or structural distortion not supported."
-                )
-            records.append({
-                "substrate_miller": substrate_miller,
-                "film_miller": film_miller,
-                "termination": term,
-                "cand_id": i,
-                "interface": itf,
-                "gap":  gap,
-                "area": area,
-                "substrate_bulk": None,
-                "film_bulk": None,
-                "sub_period_layers": sub_period_layers,
-                "film_period_layers": film_period_layers,
-            })
+            for j, (flip_sub, flip_film, sub_m, film_m) in enumerate(flip_specs):
+                itf_use = itf if (not flip_sub and not flip_film) else self.flip_interface(itf, flip_sub=flip_sub, flip_film=flip_film)
+                sub_atoms = AseAtomsAdaptor.get_atoms(itf_use.substrate)
+                film_atoms = AseAtomsAdaptor.get_atoms(itf_use.film)
+                n_sub_layers = len(GraphEncoder.cluster_layers_by_z(sub_atoms))
+                n_film_layers = len(GraphEncoder.cluster_layers_by_z(film_atoms))
+                sl = int(self.interface_params.substrate_layers)
+                fl = int(self.interface_params.film_layers)
+                sub_ratio = n_sub_layers / float(sl)
+                film_ratio = n_film_layers / float(fl)
+                sub_period_layers = int(round(sub_ratio))
+                film_period_layers = int(round(film_ratio))
+                # strict stacking consistency check (no rumpling allowed
+                if abs(sub_ratio - sub_period_layers) > 1e-6:
+                    raise RuntimeError(
+                        f"Substrate stacking inconsistency detected: "
+                        f"n_sub_layers={n_sub_layers}, sub_layers={sl}, "
+                        f"ratio={sub_ratio:.6f} (non-integer). "
+                        f"Rumbling or structural distortion not supported."
+                    )
+                if abs(film_ratio - film_period_layers) > 1e-6:
+                    raise RuntimeError(
+                        f"Film stacking inconsistency detected: "
+                        f"n_film_layers={n_film_layers}, film_layers={fl}, "
+                        f"ratio={film_ratio:.6f} (non-integer). "
+                        f"Rumbling or structural distortion not supported."
+                    )
+                records.append({
+                    "substrate_miller": sub_m,
+                    "film_miller": film_m,
+                    "termination": term,
+                    "cand_id": i,
+                    "interface": itf_use,
+                    "area": area,
+                    "substrate_bulk": None,
+                    "film_bulk": None,
+                    "sub_period_layers": sub_period_layers,
+                    "film_period_layers": film_period_layers,
+                })
 
         if build_bulk_refs:
             # Use the first candidate as a representative to set a target thickness.
@@ -374,30 +382,31 @@ class InterfaceBuilder:
                 raise RuntimeError(f"Candidate count mismatch: itfs={len(itfs)}, itf_refs={len(itf_refs)}")
             # Attach bulk references (centered) for each candidate.
             for i, (itf_ref, area_ref) in enumerate(itf_refs):
-                sub_bulk_i = self.recenter_slab(itf_ref.substrate)
-                film_bulk_i = self.recenter_slab(itf_ref.film)
-                records[i]["substrate_bulk"] = sub_bulk_i
-                records[i]["film_bulk"] = film_bulk_i
+                for j, (flip_sub, flip_film, sub_m, film_m) in enumerate(flip_specs):
+                    itf_ref_use = itf_ref if (not flip_sub and not flip_film) else self.flip_interface(itf_ref, flip_sub=flip_sub, flip_film=flip_film)
+                    sub_bulk_i = self.recenter_slab(itf_ref_use.substrate)
+                    film_bulk_i = self.recenter_slab(itf_ref_use.film)
+                    idx = i * 4 + j
+                    records[idx]["substrate_bulk"] = sub_bulk_i
+                    records[idx]["film_bulk"] = film_bulk_i
 
         # Optional structure dump for debugging
         if structure_check:
             out_dir = "results"
             os.makedirs(out_dir, exist_ok=True)
-            s = records[0]["substrate_miller"]
-            f = records[0]["film_miller"]
-            f_t, s_t = records[0]["termination"]
-            g = records[0]["gap"]
-            sub_tag = f"{s[0]}{s[1]}{s[2]}"
-            film_tag = f"{f[0]}{f[1]}{f[2]}"
-            f_t = f_t.replace("/", "-")
-            s_t = s_t.replace("/", "-")
-            term_tag = f"{s_t}_{f_t}"
-            gap_tag = f"{g:.2f}".replace(".", "p")
             for rec in records:
+                s = rec["substrate_miller"]
+                f = rec["film_miller"]
+                f_t, s_t = rec["termination"]
+                sub_tag = f"{s[0]}{s[1]}{s[2]}"
+                film_tag = f"{f[0]}{f[1]}{f[2]}"
+                f_t = f_t.replace("/", "-")
+                s_t = s_t.replace("/", "-")
+                term_tag = f"{s_t}_{f_t}"
                 i = rec["cand_id"]
                 a = rec["area"]
                 itf_fname = (f"sub{sub_tag}_film{film_tag}_"
-                             f"term{term_tag}_cand{i}_gap{gap_tag}_area{round(a)}.cif")
+                             f"term{term_tag}_cand{i}_area{round(a)}.cif")
                 itf_path = os.path.join(out_dir, itf_fname)
                 rec["interface"].to(filename=itf_path)
                 if rec["substrate_bulk"] is not None:
@@ -429,7 +438,12 @@ class InterfaceBuilder:
                 if cib is None or not cib.terminations:
                     continue
                 for term in cib.terminations:
-                    recs = self.get_interface_records(s_idx, f_idx, term, build_bulk_refs=build_bulk_refs, structure_check=structure_check)
+                    recs = self.get_interface_records(
+                        s_idx, f_idx, term,
+                        build_bulk_refs=build_bulk_refs,
+                        structure_check=structure_check,
+                        cib=cib,
+                    )
                     if not recs:
                         continue
                     records.extend(recs)
