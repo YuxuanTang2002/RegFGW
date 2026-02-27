@@ -56,7 +56,7 @@ class BOParams:
     """
     n_init: int = 20
     n_iter: int = 60
-    acq_candidates: int = 1500
+    acq_candidates: int = 3000
     seed: int = 0
     xi: float = 0.01
     penalty: float = 1e6
@@ -182,9 +182,9 @@ class RegistryPriorBO:
         if np.any(d < (cov_sum-0.1)):
             return False
 
-        n_contact = int(np.count_nonzero(d <= (vdw_sum+0.2)))
+        n_contact = int(np.count_nonzero(d <= (vdw_sum+0.1)))
 
-        if n_contact < 10:
+        if n_contact < 5:
             return False
 
         return True

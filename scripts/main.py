@@ -30,7 +30,7 @@ def main():
     # BO settings
     p.add_argument("--bo-n-init", type=int, default=20)
     p.add_argument("--bo-n-iter", type=int, default=60)
-    p.add_argument("--bo-candidates", type=int, default=1500)
+    p.add_argument("--bo-candidates", type=int, default=3000)
     p.add_argument("--bo-seed", type=int, default=0)
     p.add_argument("--bo-xi", type=float, default=0.01)
     p.add_argument("--bo-penalty", type=float, default=1e6)
