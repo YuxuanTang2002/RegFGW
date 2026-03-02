@@ -1,4 +1,5 @@
 import os
+import json
 import numpy as np
 from numpy.linalg import LinAlgError
 from dataclasses import dataclass
@@ -360,16 +361,16 @@ class InterfaceBuilder:
                         f"Rumbling or structural distortion not supported."
                     )
                 records.append({
-                    "substrate_miller": sub_m,
-                    "film_miller": film_m,
-                    "termination": term,
-                    "cand_id": i,
+                    "substrate_miller": [int(x) for x in sub_m],
+                    "film_miller": [int(x) for x in film_m],
+                    "termination": [str(term[0]), str(term[1])],
+                    "cand_id": int(i),
                     "interface": itf_use,
-                    "area": area,
+                    "area": float(area),
                     "substrate_bulk": None,
                     "film_bulk": None,
-                    "sub_period_layers": sub_period_layers,
-                    "film_period_layers": film_period_layers,
+                    "sub_period_layers": int(sub_period_layers),
+                    "film_period_layers": int(film_period_layers),
                 })
 
         if build_bulk_refs:
@@ -405,20 +406,24 @@ class InterfaceBuilder:
                 term_tag = f"{s_t}_{f_t}"
                 i = rec["cand_id"]
                 a = rec["area"]
-                itf_fname = (f"sub{sub_tag}_film{film_tag}_"
-                             f"term{term_tag}_cand{i}_area{round(a)}.cif")
-                itf_path = os.path.join(out_dir, itf_fname)
+                stem = {f"sub{sub_tag}_film{film_tag}_term{term_tag}_cand{i}"}
+                # CIFs for visualization
+                itf_path = os.path.join(out_dir, f"{stem}_area{round(a)}.cif")
                 rec["interface"].to(filename=itf_path)
                 if rec["substrate_bulk"] is not None:
-                    sub_fname = (f"sub{sub_tag}_film{film_tag}_"
-                                 f"term{term_tag}_cand{i}_sub_bulk.cif")
-                    sub_path = os.path.join(out_dir, sub_fname)
+                    sub_path = os.path.join(out_dir, f"{stem}_sub_bulk.cif")
                     rec["substrate_bulk"].to(filename=sub_path)
                 if rec["film_bulk"] is not None:
-                    film_fname = (f"sub{sub_tag}_film{film_tag}_"
-                                  f"term{term_tag}_cand{i}_film_bulk.cif")
-                    film_path = os.path.join(out_dir, film_fname)
+                    film_path = os.path.join(out_dir, f"{stem}_film_bulk.cif")
                     rec["film_bulk"].to(filename=film_path)
+                # JSON files for runnable artifact
+                meta = dict(rec)
+                meta["interface"] = rec["interface"].as_dict()
+                meta["substrate_bulk"] = rec["substrate_bulk"].as_dict() if rec["substrate_bulk"] is not None else None
+                meta["film_bulk"] = rec["film_bulk"].as_dict() if rec["film_bulk"] is not None else None
+                json_path = os.path.join(out_dir, f"{stem}_record.json")
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(meta, f, indent=2)
 
         return records
 
