@@ -124,22 +124,26 @@ class RegistryPriorBO:
 
         return itf
 
-    # -----------------------------------------------------------------------------
-    # Physical continuity constraints
-    # -----------------------------------------------------------------------------
-
     @staticmethod
-    def check_registry_continuity(itf: Interface):
+    def count_interface_pairs(itf: Interface):
         """
-        Enforce physical continuity constraints at the interface
+        Count interfacial atom pairs within a finite interface window.
 
-        check:
-        1) No interatomic distance smaller than covalent radius sum (avoid atomic overlap)
-        2) Sufficient interfacial contact within van der Waals range
+        Parameters
+        ----------
+        itf: Interface object
 
         Returns
         -------
-        True if registry satisfies physical continuity constraints.
+        dict{
+        "sub_indices": list[int],
+        "film_indices": list[int],
+        "sub_nums: np.ndarray",
+        "film_nums": np.ndarray,
+        "cov_sum": np.ndarray, # shape = (n_sub, n_film)
+        "vdw_sum": np.ndarray, # shape = (n_sub, n_film)
+        "d": np.ndarray, # shape = (n_sub, n_film)
+        }
         """
         c_all = np.array([s.coords[2] for s in itf.sites], dtype=float)
         sub_c_max = float(np.max(c_all[itf.substrate_indices]))
@@ -179,15 +183,117 @@ class RegistryPriorBO:
             for b, j in enumerate(film_indices):
                 d[a, b] = float(itf.get_distance(i, j))
 
-        if np.any(d < (cov_sum-0.1)):
+        return {
+            "sub_indices": sub_indices,
+            "film_indices": film_indices,
+            "sub_nums": sub_nums,
+            "film_nums": film_nums,
+            "cov_sum": cov_sum,
+            "vdw_sum": vdw_sum,
+            "d": d,
+        }
+
+    # -----------------------------------------------------------------------------
+    # Physical continuity constraints
+    # -----------------------------------------------------------------------------
+
+    def check_registry_continuity(self, itf: Interface):
+        """
+        Enforce physical continuity constraints at the interface
+
+        check:
+        1) No interatomic distance smaller than covalent radius sum (avoid atomic overlap)
+        2) Sufficient interfacial contact within van der Waals range
+
+        Returns
+        -------
+        True if registry satisfies physical continuity constraints.
+        """
+        pairs = self.count_interface_pairs(itf)
+        sub_indices = pairs["sub_indices"]
+        film_indices = pairs["film_indices"]
+        cov_sum = pairs["cov_sum"]
+        vdw_sum = pairs["vdw_sum"]
+        d = pairs["d"]
+
+        # Overlap check (too close)
+        overlap = (d < (cov_sum - 0.2))
+        n_sub_overlap = np.count_nonzero(np.any(overlap, axis=1))
+        n_film_overlap = np.count_nonzero(np.any(overlap, axis=0))
+        max_overlap_atoms = max(1, int(0.05 * min(len(sub_indices), len(film_indices))))
+
+        if max(n_sub_overlap, n_film_overlap) > max_overlap_atoms:
             return False
 
-        n_contact = int(np.count_nonzero(d <= (vdw_sum+0.1)))
+        # Contact check (too far)
+        contact = (d <= (vdw_sum + 0.2))
+        n_sub_contact = np.count_nonzero(np.any(contact, axis=1))
+        n_film_contact = np.count_nonzero(np.any(contact, axis=0))
+        min_contact_atoms = max(3, int(0.05 * min(len(sub_indices), len(film_indices))))
 
-        if n_contact < 5:
+        if min(n_sub_contact, n_film_contact) < min_contact_atoms:
             return False
 
         return True
+
+    # -----------------------------------------------------------------------------
+    # Normal registry feasibility scanning
+    # -----------------------------------------------------------------------------
+
+    def suggest_shift_c(self, interface: Dict[str, Any]):
+        """
+        Suggest a uniform near-contact normal shift for the reference interface.
+
+        Strategy
+        --------
+        1） Use a small set of representative reference registries.
+        2） For each registry, scan shift_c values along the surface normal and return the first shift
+        at which the reference interface enters a physically meaningful near-contact regime.
+        3) Take the median shift_c over the reference registries.
+        """
+        base_itf = interface["interface"]
+        scan_grid = [-i * 0.05 for i in range(100)]
+        grid = [0.0, 0.25, 0.5, 0.75]
+        ref_registries = [(a, b) for a in grid for b in grid]
+        ref_shift_cs: List[float] = []
+        total_steps =len(ref_registries) * len(scan_grid)
+
+        with tqdm(total=total_steps, desc="Near-contact scanning") as pbar:
+            for shift_a, shift_b in ref_registries:
+                ref_itf = self.shift_film(base_itf, shift_a=float(shift_a), shift_b=float(shift_b))
+                found_shift_c = None
+                for shift_c in scan_grid:
+                    itf_try = self.shift_film(ref_itf, shift_c=float(shift_c))
+                    pairs = self.count_interface_pairs(itf_try)
+                    sub_indices = pairs["sub_indices"]
+                    film_indices = pairs["film_indices"]
+                    cov_sum = pairs["cov_sum"]
+                    d = pairs["d"]
+                    # Near-contact shell based on covalent radii + small buffer
+                    contact = (d <= (cov_sum + 0.2))
+                    n_sub_contact = np.count_nonzero(np.any(contact, axis=1))
+                    n_film_contact = np.count_nonzero(np.any(contact, axis=0))
+                    min_contact_atoms = max(3, int(0.05 * min(len(sub_indices), len(film_indices))))
+                    if min(n_sub_contact, n_film_contact) >= min_contact_atoms:
+                        found_shift_c = float(shift_c)
+                        pbar.update(1)
+                        break
+                    pbar.update(1)
+                if found_shift_c is not None:
+                    remaining = len(scan_grid) - (scan_grid.index(found_shift_c) + 1)
+                    if remaining > 0:
+                        pbar.update(remaining)
+                else:
+                    raise RuntimeError(
+                        f"No near-contact shift_c found for reference registry (shift_a={shift_a}, shift_b={shift_b}). "
+                        "Interface may be too separated or chemically incompatible under current settings."
+                    )
+                ref_shift_cs.append(found_shift_c)
+
+        suggested_shift_c = float(np.median(ref_shift_cs))
+        tqdm.write(f"Suggested shift_c: {suggested_shift_c:.6f}Å")
+
+        return suggested_shift_c
 
     # -----------------------------------------------------------------------------
     # Registry scoring
@@ -246,68 +352,6 @@ class RegistryPriorBO:
         return float(score), shifted_itf
 
     # -----------------------------------------------------------------------------
-    # Normal registry feasibility scanning
-    # -----------------------------------------------------------------------------
-
-    def suggest_shift_c_interval(self, interface: Dict[str, Any]):
-        """
-        Suggest physically feasible normal shift interval.
-
-        Notes
-        -----
-        1) Scan shift_c values to determine:
-        * Lower bound: onset of atomic overlap
-        * Upper bound: loss of interfacial interaction
-        2) A three-point moving average is used to identify the most bulk-continuous normal window.
-        3) This routine is diagnostic and does not modify the optimization space directly.
-        """
-        base_itf = interface["interface"]
-        first_true = None
-        last_true = None
-        scan_grid = [-i * 0.1 for i in range(51)]
-
-        with tqdm(total=(len(scan_grid)*2), desc="Gap scanning") as pbar:
-            # Stage 1: continuity scanning
-            for shift_c in scan_grid:
-                itf_try = self.shift_film(base_itf, shift_c=float(shift_c))
-                if self.check_registry_continuity(itf_try):
-                    if first_true is None:
-                        first_true = float(shift_c)
-                    last_true = float(shift_c)
-                    pbar.set_postfix(hi=first_true, lo=last_true)
-                else:
-                    if first_true is not None:
-                        break
-                pbar.update(1)
-            if first_true is None:
-                raise RuntimeError(
-                    "No feasible shift_c found"
-                    "Interface geometrically incompatible with current physical constraints"
-                )
-            # Stage 2: gap scoring
-            pbar.set_description("Gap scoring")
-            c_range = np.arange(last_true, first_true + 1e-6, 0.1, dtype=float)
-            scores = np.empty_like(c_range, dtype=float)
-            for i, shift_c in enumerate(map(float, c_range)):
-                score, _ = self.score_registry(interface, shift_c=shift_c)
-                scores[i] = score
-                pbar.update(1)
-
-        # moving average
-        if len(c_range) < 3:
-            best_idx = int(np.nanargmin(scores))
-            sug_c_min = sug_c_max = c_range[best_idx]
-        else:
-            avg_scores = np.array([np.mean(scores[i:i+3]) for i in range(len(scores)-2)], dtype=float)
-            best_idx = int(np.nanargmin(avg_scores))
-            sug_c_min, sug_c_max = c_range[best_idx], c_range[best_idx+2]
-
-        shift_c = 0.5 * (sug_c_min + sug_c_max)
-        tqdm.write(f"Suggested shift_c: {shift_c:.6f}Å")
-
-        return float(shift_c)
-
-    # -----------------------------------------------------------------------------
     # Main optimizer
     # -----------------------------------------------------------------------------
 
@@ -348,7 +392,11 @@ class RegistryPriorBO:
             pdf = norm.pdf(z)
             return (best-mu-xi) * cdf + sigma * pdf
 
-        shift_c = self.suggest_shift_c_interval(interface)
+        try:
+            shift_c = self.suggest_shift_c(interface)
+        except Exception as e:
+            shift_c = 0.0
+            print(f"[Warn] suggest_shift_c_interval failed. {type(e).__name__}: {e}. Keep as-built gap and continue.")
 
         if self.structure_check:
             self.g_sub_bulk = None

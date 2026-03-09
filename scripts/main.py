@@ -6,11 +6,21 @@ from regfgw.fgw_metric import FGWBuilder, FGWBuildParams, FGWScorer, FGWScorePar
 from regfgw.registry_bo import RegistryPriorBO, BOParams
 
 def main():
-    p = argparse.ArgumentParser(description="Main pipline for FGW registry scores")
+    p = argparse.ArgumentParser(description="Interface construction and FGW-based registry optimization pipeline")
+    # Global mode
+    p.add_argument(
+        "--mode",
+        choices=["build","optimize"],
+        default="optimize",
+        help=(
+            "build: build interface candidates only and exit. "
+            "optimize: run Bayesian optimization on built candidates."
+        ),
+    )
     # Inputs
-    p.add_argument("--substrate", required=True, help="substrate unit cell CIF")
-    p.add_argument("--film", required=True, help="film unit cell CIF")
-    p.add_argument("--embedding", required=True, help="element embedding file")
+    p.add_argument("--substrate", required=True, help="Substrate unit cell CIF")
+    p.add_argument("--film", required=True, help="Film unit cell CIF")
+    p.add_argument("--embedding", default=None, help="Element embedding file (required in optimize mode)")
     # Interface construction
     p.add_argument("--max-miller", type=int, default=1)
     p.add_argument("--film-layers", type=int, default=3)
@@ -35,17 +45,27 @@ def main():
     p.add_argument("--bo-xi", type=float, default=0.01)
     p.add_argument("--bo-penalty", type=float, default=1e6)
     # Output switches
-    p.add_argument("--structure-check", action="store_true",
-                   help="Dump intermediate structures (interfaces, bulk cores, picked layers, etc.)")
-    p.add_argument("--out-best", action="store_true",
-                   help="Write best-registry CIF for each candidate (base_path + '_initial.cif')")
     p.add_argument("--out-traj", action="store_true",
-                   help="Write BO sampled registries with FGW scores to .traj files")
+                   help="Write BO sampled registries with FGW scores to .traj files.")
+    p.add_argument("--pipeline-check", action="store_true",
+                   help="Check intermediate structures generated in the pipeline.")
     args = p.parse_args()
+
+    if args.mode == "build":
+        print("[Mode] Build mode: interface construction only. Bayesian optimization will be skipped.")
+    else:
+        print("[Mode] Optimize mode: Bayesian optimization will be run.")
+        if not args.embedding:
+            p.error("--embedding is required when --mode optimize is used.")
+        if args.pipeline_check:
+            print("[Note] Pipeline check enabled: intermediate structures will be dumped.")
+        if args.out_traj:
+            print("[Note] BO trajectory output enabled: .traj files will be written.")
 
     # -------------------------------------------------------------------------
     # Build interface candidates
     # -------------------------------------------------------------------------
+
     substrate = Structure.from_file(args.substrate)
     film = Structure.from_file(args.film)
     zsl_params = ZSLParams(
@@ -57,6 +77,7 @@ def main():
     interface_params = InterfaceParams(
         film_layers=args.film_layers,
         substrate_layers=args.substrate_layers,
+        gap=args.gap,
         vacuum=args.vacuum,
     )
     interface_builder = InterfaceBuilder(
@@ -68,12 +89,15 @@ def main():
     )
     records = interface_builder.sum_interface_records(
         build_bulk_refs=True,
-        structure_check=args.structure_check,
+        structure_check=(args.mode=="build"),
     )
     print(f"[Note] {len(records)} interface candidates are built.")
 
     if not records:
         raise RuntimeError("No valid interface candidates generated.")
+
+    if args.mode == "build":
+        return
 
     # -------------------------------------------------------------------------
     # Bayesian optimization of interface registries
@@ -100,7 +124,7 @@ def main():
             xi=args.bo_xi,
             penalty=args.bo_penalty,
         ),
-        structure_check=args.structure_check,
+        structure_check=args.pipeline_check,
     )
 
     # -------------------------------------------------------------------------
@@ -108,17 +132,28 @@ def main():
     # -------------------------------------------------------------------------
 
     for interface in records:
-        best_record, _ = bo.bayes_optimize_registry(
-            interface,
-            out_best=args.out_best,
-            out_traj=args.out_traj,
-        )
-        print(
-            f"[done] miller={interface['substrate_miller']}/"
-            f"{interface['film_miller']} "
-            f"term={interface['termination']} "
-            f"cand={interface['cand_id']} "
-        )
+        try:
+            best_record, _ = bo.bayes_optimize_registry(
+                interface,
+                out_best=True,
+                out_traj=args.out_traj,
+            )
+            print(
+                f"[Done] miller={interface['substrate_miller']}/"
+                f"{interface['film_miller']} "
+                f"term={interface['termination']} "
+                f"cand={interface['cand_id']} "
+            )
+
+        except Exception as e:
+            print(
+                f"[Error] miller={interface['substrate_miller']}/"
+                f"{interface['film_miller']} "
+                f"term={interface['termination']} "
+                f"cand={interface['cand_id']} "
+                f"failed: {type(e).__name__}: {e}"
+            )
+            continue
 
 if __name__ == "__main__":
     main()
