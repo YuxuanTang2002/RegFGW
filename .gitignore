@@ -19,6 +19,8 @@ dist/
 
 # results / outputs
 results/
+data/potentials_PBE/
+vasp_jobs/
 
 # logs & temp
 *.log

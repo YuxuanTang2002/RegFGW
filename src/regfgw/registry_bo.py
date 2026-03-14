@@ -270,7 +270,7 @@ class RegistryPriorBO:
                     cov_sum = pairs["cov_sum"]
                     d = pairs["d"]
                     # Near-contact shell based on covalent radii + small buffer
-                    contact = (d <= (cov_sum + 0.2))
+                    contact = (d <= (cov_sum + 0.25))
                     n_sub_contact = np.count_nonzero(np.any(contact, axis=1))
                     n_film_contact = np.count_nonzero(np.any(contact, axis=0))
                     min_contact_atoms = max(3, int(0.05 * min(len(sub_indices), len(film_indices))))
