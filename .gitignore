@@ -19,8 +19,10 @@ dist/
 
 # results / outputs
 results/
-data/potentials_PBE/
 vasp_jobs/
+
+# VASP potentials (licensed)
+data/potentials_PBE/
 
 # logs & temp
 *.log
