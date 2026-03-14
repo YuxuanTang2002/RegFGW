@@ -216,7 +216,9 @@ def prepare_job_array(out_dir: Path, job_cfg: JobConfig, sample_cfg: GridSampleC
 #$ -o logs/$JOB_NAME.$JOB_ID.$TASK_ID.out
 #$ -e logs/$JOB_NAME.$JOB_ID.$TASK_ID.err
 
-module purge
+module unload -f compilers mpi
+module load compilers/intel/2019/update5
+module load mpi/intel/2019/update5/intel
 module load {job_cfg.vasp_module}
 
 BASE_DIR=$(pwd)

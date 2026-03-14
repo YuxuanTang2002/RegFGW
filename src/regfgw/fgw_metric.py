@@ -47,7 +47,7 @@ class FGWBuilder:
 
     @staticmethod
     def check_dense_labels(g: nx.Graph):
-        """Enforce nodes are labeled as 0, 1, .., n-1, for mapping matrices back to graph nodes."""
+        """Enforce nodes are labeled as 0, 1, ..., n-1, for mapping matrices back to graph nodes."""
         n = int(g.number_of_nodes())
 
         if n == 0:
