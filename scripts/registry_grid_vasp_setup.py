@@ -82,8 +82,6 @@ class JobConfig:
     cores: int = 24
     walltime: str = "48:00:00"
     mem_per_core: str = "4G"
-    vasp_module: str = "vasp/6.3.0-24Jan2022/intel-2019-update5"
-    vasp_command: str = "gerun vasp_std > vasp.out"
 
 def scan_registry_grid(base_itf: Dict[str, Any], bo: RegistryPriorBO, cfg: GridSampleConfig):
     shift_c = float(bo.suggest_shift_c(base_itf))
@@ -219,17 +217,19 @@ def prepare_job_array(out_dir: Path, job_cfg: JobConfig, sample_cfg: GridSampleC
 module unload -f compilers mpi
 module load compilers/intel/2019/update5
 module load mpi/intel/2019/update5/intel
-module load {job_cfg.vasp_module}
+
+export PATH=$HOME/vasp.6.4.2/bin:$PATH
 
 BASE_DIR=$(pwd)
 CASE_DIR=$(printf "case%02d" $SGE_TASK_ID)
 
+echo "Using VASP: $(which vasp_std)"
 echo "Running case: $CASE_DIR"
 echo "Host: $(hostname)"
 echo "Start: $(date)"
 
 cd "$BASE_DIR/$CASE_DIR" || exit 1
-{job_cfg.vasp_command}
+gerun vasp_std > vasp.out
 
 echo "Finish: $(date)"
 """

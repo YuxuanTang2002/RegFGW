@@ -22,7 +22,7 @@ results/
 vasp_jobs/
 
 # VASP potentials (licensed)
-data/potentials_PBE/
+data/potentials_PBE_54/
 
 # logs & temp
 *.log
