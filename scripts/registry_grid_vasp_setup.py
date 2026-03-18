@@ -40,29 +40,34 @@ class RelaxConfig:
     prec: str = "Accurate"
     ediff: float = 1e-5
     ediffg: float = -0.03
-    nelm: int = 100
+    nelm: int = 80
     algo: str = "Normal"
+    addgrid: bool = True
     lreal: Union[str, bool] = "Auto"
     lasph: bool = True
     ibrion: int = 2
     nsw: int = 150
+    potim: float = 0.1
     isif: int = 2
     ismear: int = 0
-    sigma: float = 0.05
+    sigma: float = 0.10
     isym: int = 0
     ldipol: bool = True
     idipol: int = 3
-    lwave: bool = False
-    lcharg: bool = False
+    amix: float = 0.1
+    bmix: float = 0.0001
+    lwave: bool = True
+    lcharg: bool = True
 
 @dataclass(frozen=True)
 class StaticConfig:
     encut: int = 520
     prec: str = "Accurate"
     ediff: float = 1e-6
-    nelm: int = 100
+    nelm: int = 80
     algo: str = "Normal"
-    lreal: Union[str, bool] = "Auto"
+    addgrid: bool = True
+    lreal: Union[str, bool] = False
     lasph: bool = True
     ibrion: int = -1
     nsw: int = 0
@@ -71,6 +76,8 @@ class StaticConfig:
     isym: int = 0
     ldipol: bool = True
     idipol: int = 3
+    amix: float = 0.1
+    bmix: float = 0.0001
     lwave: bool = False
     lcharg: bool = False
 
@@ -79,7 +86,7 @@ class JobConfig:
     job_name: str = "OPT"
     project: str = "UCL_chemM_Butler"
     queue_type: str = "Gold"
-    cores: int = 24
+    cores: int = 40
     walltime: str = "48:00:00"
     mem_per_core: str = "4G"
 
