@@ -43,7 +43,7 @@ class RelaxConfig:
     nelm: int = 120
     algo: str = "Normal"
     addgrid: bool = True
-    amix: float = 0.2
+    amix: float = 0.15
     bmix: float = 0.001
     lreal: Union[str, bool] = "Auto"
     lasph: bool = True
@@ -67,7 +67,7 @@ class StaticConfig:
     nelm: int = 120
     algo: str = "Normal"
     addgrid: bool = True
-    amix: float = 0.2
+    amix: float = 0.15
     bmix: float = 0.001
     lreal: Union[str, bool] = "Auto"
     lasph: bool = True
