@@ -355,7 +355,13 @@ class RegistryPriorBO:
     # Main optimizer
     # -----------------------------------------------------------------------------
 
-    def bayes_optimize_registry(self, interface: Dict[str, Any], out_best: bool = False, out_traj: bool = False):
+    def bayes_optimize_registry(
+            self,
+            interface: Dict[str, Any],
+            out_best: bool = False,
+            out_traj: bool = False,
+            dft_gap_offset: float = 0.0,
+    ):
         """
         Perform Bayesian optimization over in-plane registry space.
 
@@ -475,7 +481,8 @@ class RegistryPriorBO:
         if out_best:
             base_path = self.enc.build_base_path(interface)
             cif_path = f"{base_path}_initial.cif"
-            best_reg = AseAtomsAdaptor.get_atoms(best_record.registry)
+            best_reg = self.shift_film(best_record.registry, shift_c=dft_gap_offset)
+            best_reg = AseAtomsAdaptor.get_atoms(best_reg)
             write(cif_path, best_reg)
 
         if out_traj:

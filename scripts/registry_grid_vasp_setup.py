@@ -36,38 +36,40 @@ class GridSampleConfig:
 
 @dataclass(frozen=True)
 class RelaxConfig:
-    encut: int = 520
+    encut: float = 520.0
     prec: str = "Accurate"
     ediff: float = 1e-5
     ediffg: float = -0.03
-    nelm: int = 80
+    nelm: int = 120
     algo: str = "Normal"
     addgrid: bool = True
+    amix: float = 0.2
+    bmix: float = 0.001
     lreal: Union[str, bool] = "Auto"
     lasph: bool = True
     ibrion: int = 2
-    nsw: int = 150
+    nsw: int = 20
     potim: float = 0.1
     isif: int = 2
     ismear: int = 0
-    sigma: float = 0.10
+    sigma: float = 0.1
     isym: int = 0
-    ldipol: bool = True
-    idipol: int = 3
-    amix: float = 0.1
-    bmix: float = 0.0001
+    # ldipol: bool = True
+    # idipol: int = 3
     lwave: bool = True
     lcharg: bool = True
 
 @dataclass(frozen=True)
 class StaticConfig:
-    encut: int = 520
+    encut: float = 520.0
     prec: str = "Accurate"
     ediff: float = 1e-6
-    nelm: int = 80
+    nelm: int = 120
     algo: str = "Normal"
     addgrid: bool = True
-    lreal: Union[str, bool] = False
+    amix: float = 0.2
+    bmix: float = 0.001
+    lreal: Union[str, bool] = "Auto"
     lasph: bool = True
     ibrion: int = -1
     nsw: int = 0
@@ -76,8 +78,6 @@ class StaticConfig:
     isym: int = 0
     ldipol: bool = True
     idipol: int = 3
-    amix: float = 0.1
-    bmix: float = 0.0001
     lwave: bool = False
     lcharg: bool = False
 
@@ -86,7 +86,7 @@ class JobConfig:
     job_name: str = "OPT"
     project: str = "UCL_chemM_Butler"
     queue_type: str = "Gold"
-    cores: int = 40
+    cores: int = 32
     walltime: str = "48:00:00"
     mem_per_core: str = "4G"
 
@@ -256,6 +256,7 @@ def main():
     p.add_argument("--embedding", required=True, help="Element embedding JSON/CSV")
     p.add_argument("--potcar-root", required=True, help="Root directory of POTCAR library")
     p.add_argument("--out-dir", required=True, help="Output directory")
+    p.add_argument("--dft-gap-offset", type=float, default=0.0, help="Additional normal gap offset applied before structure output")
     p.add_argument("--mode", choices=["opt", "scf"], default="opt")
     p.add_argument("--kspacing", type=float, default=0.25, help="Reciprocal-spcae k-point spacing")
     p.add_argument("--free-sub-top-frac", type=float, default=0.5, help="Top fraction of substrate slab allowed to relax")
@@ -300,6 +301,9 @@ def main():
     points = scan_registry_grid(record, bo, sample_cfg)
     pool = select_cases(points, sample_cfg)
 
+    if args.dft_gap_offset != 0.0:
+        print(f"[Note] DFT gap offset enabled: {args.dft_gap_offset:.3f}Å will be applied.")
+
     # Write summary CSV
     summary_path = out_dir / "summary.csv"
 
@@ -311,7 +315,7 @@ def main():
                 i,
                 f"{point.shift_a:.3f}",
                 f"{point.shift_b:.3f}",
-                f"{point.shift_c:.3f}",
+                f"{point.shift_c + args.dft_gap_offset:.3f}",
                 f"{point.fgw_score:.12f}",
             ])
 
@@ -329,16 +333,18 @@ def main():
         print("[Note] Static calculation INCAR will be generated.")
 
     potcar_root = Path(args.potcar_root)
-    sym_potcar_map = {"Na": "Na_pv", "K": "K_pv"}
+    sym_potcar_map = {"Ga": "Ga_d", "Na": "Na_pv", "K": "K_pv"}
 
     for i, point in enumerate(pool, start=1):
         case_dir = out_dir / f"case{i:02d}"
         case_dir.mkdir(parents=True, exist_ok=True)
+        reg = point.registry
+        reg = RegistryPriorBO.shift_film(reg, shift_c=args.dft_gap_offset)
         prepare_incar(case_dir=case_dir, cfg=incar_cfg)
         prepare_kpoints(case_dir=case_dir, itf=point.registry, kspacing=args.kspacing)
         prepare_poscar(
             case_dir=case_dir,
-            itf=point.registry,
+            itf=reg,
             free_sub_top_frac=args.free_sub_top_frac,
             free_film_bottom_frac=args.free_film_bottom_frac,
         )

@@ -26,6 +26,7 @@ def main():
     p.add_argument("--film-layers", type=int, default=3)
     p.add_argument("--substrate-layers", type=int, default=3)
     p.add_argument("--gap", type=float, default=5.0)
+    p.add_argument("--dft-gap-offset", type=float, default=0.0, help="Additional normal gap offset applied before structure output")
     p.add_argument("--vacuum", type=float, default=20.0)
     # ZSL tolerances
     p.add_argument("--zsl-max-area", type=float, default=150.0)
@@ -61,6 +62,8 @@ def main():
             print("[Note] Pipeline check enabled: intermediate structures will be dumped.")
         if args.out_traj:
             print("[Note] BO trajectory output enabled: .traj files will be written.")
+        if args.dft_gap_offset != 0.0:
+            print(f"[Note] DFT gap offset enabled: {args.dft_gap_offset:.3f}Å will be applied.")
 
     # -------------------------------------------------------------------------
     # Build interface candidates
@@ -137,6 +140,7 @@ def main():
                 interface,
                 out_best=True,
                 out_traj=args.out_traj,
+                dft_gap_offset=args.dft_gap_offset,
             )
             print(
                 f"[Done] miller={interface['substrate_miller']}/"

@@ -268,6 +268,12 @@ def main():
     ap.add_argument("--fmax", type=float, default=0.03)
     ap.add_argument("--max_steps", type=int, default=300)
     ap.add_argument("--optimizer", type=str, default="FIRE", help="FIRE or BFGS")
+    ap.add_argument(
+        "--relax_gap_offset",
+        type=float,
+        default=0.0,
+        help="Extra gap offset in Å added only before MACE relaxation."
+    )
 
     # GPU / dtype
     ap.add_argument("--mace_model", type=str, default="medium")
@@ -370,8 +376,9 @@ def main():
         key = (p.shift_a, p.shift_b)
         if key in relax_cache:
             return relax_cache[key]
+        reg_relax = RegistryPriorBO.shift_film(p.registry, shift_c=args.relax_gap_offset)
         e, steps, conv = relax_with_mace_mp(
-            p.registry,
+            reg_relax,
             calc=calc,
             fmax=float(args.fmax),
             max_steps=int(args.max_steps),
@@ -408,7 +415,7 @@ def main():
             "grid_idx": int(p.idx),
             "shift_a": float(p.shift_a),
             "shift_b": float(p.shift_b),
-            "shift_c": float(shift_c),
+            "shift_c": float(shift_c + args.relax_gap_offset),
             "fgw_score": float(p.fgw_score),
             "relaxed_energy_eV": float(e),
             "relax_steps": int(steps),
@@ -419,7 +426,7 @@ def main():
             "grid_idx": int(p.idx),
             "shift_a": float(p.shift_a),
             "shift_b": float(p.shift_b),
-            "shift_c": float(shift_c),
+            "shift_c": float(shift_c + args.relax_gap_offset),
             "fgw_score": float(p.fgw_score),
             "relaxed_energy_eV": float(e),
         })
