@@ -4,11 +4,13 @@ import math
 import json
 import csv
 from tqdm import tqdm
+from ase import Atoms
 from monty.json import MontyDecoder
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 from typing import Any, Dict, List, Union, Optional
 from pathlib import Path
 from pymatgen.core.interface import Interface
+from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.io.vasp.inputs import Poscar, Incar, Kpoints
 from regfgw.structure_to_graph import GraphEncoder
 from regfgw.fgw_metric import FGWBuilder, FGWBuildParams, FGWScorer, FGWScoreParams
@@ -48,14 +50,19 @@ class RelaxConfig:
     lreal: Union[str, bool] = "Auto"
     lasph: bool = True
     ibrion: int = 2
-    nsw: int = 20
+    nsw: int = 100
     potim: float = 0.05
     isif: int = 2
     ismear: int = 0
     sigma: float = 0.1
     isym: int = 0
-    # ldipol: bool = True
-    # idipol: int = 3
+    # Formal relaxation setting after pre-relaxation without dipole correction
+    istart: int = 1
+    icharg: int = 0
+    ldipol: bool = True
+    idipol: int = 3
+    dipol: Optional[List[float]] = None
+    # Output control
     lwave: bool = True
     lcharg: bool = True
 
@@ -78,14 +85,22 @@ class StaticConfig:
     isym: int = 0
     ldipol: bool = True
     idipol: int = 3
+    dipol: Optional[List[float]] = None
     lwave: bool = False
     lcharg: bool = False
 
 @dataclass(frozen=True)
-class JobConfig:
+class SgeJobConfig:
     job_name: str = "OPT"
     project: str = "UCL_chemM_Butler"
     queue_type: str = "Gold"
+    cores: int = 32
+    walltime: str = "48:00:00"
+    mem_per_core: str = "4G"
+
+@dataclass(frozen=True)
+class SlurmJobConfig:
+    job_name: str = "OPT"
     cores: int = 32
     walltime: str = "48:00:00"
     mem_per_core: str = "4G"
@@ -135,6 +150,17 @@ def select_cases(points: List[GridPoint], cfg: GridSampleConfig):
     pool = low + mid + high
     pool = sorted(pool, key=lambda p: p.fgw_score)
     return pool
+
+def build_dipol(itf: Interface, idipol: int):
+    if idipol not in (1, 2, 3):
+        raise ValueError(f"Invalid IDIPOL: {idipol}. Must be 1, 2, or 3.")
+
+    atoms: Atoms = AseAtomsAdaptor.get_atoms(itf)
+    mass_center_frac = atoms.get_center_of_mass(scaled=True)
+    dipol = [0.5, 0.5, 0.5]
+    dipol[idipol - 1] = float(mass_center_frac[idipol - 1])
+
+    return dipol
 
 def prepare_incar(case_dir: Path, cfg: RelaxConfig | StaticConfig):
     d = asdict(cfg)
@@ -207,9 +233,11 @@ def prepare_potcar(case_dir: Path, potcar_root: Path, sym_potcar_map: dict | Non
                 raise FileNotFoundError(f"POTCAR not found for {pot_name}")
             fout.write(pot_path.read_bytes())
 
-def prepare_job_array(out_dir: Path, job_cfg: JobConfig, sample_cfg: GridSampleConfig):
+def prepare_job_array(out_dir: Path, job_cfg: SgeJobConfig | SlurmJobConfig, sample_cfg: GridSampleConfig, scheduler: str):
     (out_dir / "logs").mkdir(parents=True, exist_ok=True)
-    scripts = f"""#!/bin/bash -l
+
+    if scheduler == "sge":
+        scripts = f"""#!/bin/bash -l
 #$ -N {job_cfg.job_name}
 #$ -P {job_cfg.queue_type}
 #$ -A {job_cfg.project}
@@ -240,6 +268,40 @@ gerun vasp_std > vasp.out
 
 echo "Finish: $(date)"
 """
+    else:
+        scripts = f"""#!/bin/bash -l
+#SBATCH --job-name={job_cfg.job_name}
+#SBATCH --array=1-{sample_cfg.n_cases}
+#SBATCH --nodes=1
+#SBATCH --ntasks={job_cfg.cores}
+#SBATCH --cpus-per-task=1
+#SBATCH --time={job_cfg.walltime}
+#SBATCH --output=logs/%x.%A.%a.out
+#SBATCH --error=logs/%x.%A.%a.err
+
+module purge
+module load ucl-stack/2025-12
+module load compilers/intel-oneapi/2024.2.1/gcc-12.3.0-avx2
+module load mpi/intel-oneapi-mpi/2021.14.0/intel-oneapi-2024.2.1-avx2
+module load intel-oneapi-mkl/2023.2.0-intel-oneapi-mpi/intel-oneapi-2024.2.1-avx2
+
+export PATH=$HOME/vasp.6.4.2.ng/bin:$PATH
+export OMP_NUM_THREADS=1
+
+BASE_DIR=$(pwd)
+CASE_DIR=$(printf "case%02d" $SLURM_ARRAY_TASK_ID)
+
+echo "Using VASP: $(which vasp_std)"
+echo "Running case: $CASE_DIR"
+echo "Host: $(hostname)"
+echo "Start: $(date)"
+
+cd "$BASE_DIR/$CASE_DIR" || exit 1
+srun vasp_std > vasp.out
+
+echo "Finish: $(date)"
+"""
+
     path = out_dir / "submit_job_array.sh"
     path.write_text(scripts, encoding="utf-8", newline="\n")
     path.chmod(0o755)
@@ -258,6 +320,7 @@ def main():
     p.add_argument("--out-dir", required=True, help="Output directory")
     p.add_argument("--dft-gap-offset", type=float, default=0.0, help="Additional normal gap offset applied before structure output")
     p.add_argument("--mode", choices=["opt", "scf"], default="opt")
+    p.add_argument("--scheduler", choices=["sge", "slurm"], default="sge", help="Output job submission script for SGE or SLURM.")
     p.add_argument("--kspacing", type=float, default=0.25, help="Reciprocal-spcae k-point spacing")
     p.add_argument("--free-sub-top-frac", type=float, default=0.5, help="Top fraction of substrate slab allowed to relax")
     p.add_argument("--free-film-bottom-frac", type=float, default=0.5, help="Bottom fraction of film slab allowed to relax")
@@ -325,12 +388,27 @@ def main():
 
     if args.mode == "opt":
         incar_cfg = RelaxConfig()
-        job_cfg = JobConfig(job_name="OPT")
+        job_name = "OPT"
         print("[Note] Relaxation INCAR will be generated.")
     else:
         incar_cfg = StaticConfig()
-        job_cfg = JobConfig(job_name="SCF")
+        job_name = "SCF"
         print("[Note] Static calculation INCAR will be generated.")
+
+    if getattr(incar_cfg, "ldipol", False):
+        if not hasattr(incar_cfg, "idipol"):
+            raise ValueError("IDIPOL must be set in INCAR config.")
+        ref_reg = pool[0].registry
+        ref_reg = RegistryPriorBO.shift_film(ref_reg, shift_c=args.dft_gap_offset)
+        dipol = build_dipol(ref_reg, idipol=incar_cfg.idipol)
+        incar_cfg = replace(incar_cfg, dipol=dipol)
+        print(f"[Note] DIPOL set from reference structure: {dipol}")
+
+
+    if args.scheduler == "sge":
+        job_cfg = SgeJobConfig(job_name=job_name)
+    else:
+        job_cfg = SlurmJobConfig(job_name=job_name)
 
     potcar_root = Path(args.potcar_root)
     sym_potcar_map = {"Ga": "Ga_d", "Na": "Na_pv", "K": "K_pv"}
@@ -341,7 +419,7 @@ def main():
         reg = point.registry
         reg = RegistryPriorBO.shift_film(reg, shift_c=args.dft_gap_offset)
         prepare_incar(case_dir=case_dir, cfg=incar_cfg)
-        prepare_kpoints(case_dir=case_dir, itf=point.registry, kspacing=args.kspacing)
+        prepare_kpoints(case_dir=case_dir, itf=reg, kspacing=args.kspacing)
         prepare_poscar(
             case_dir=case_dir,
             itf=reg,
@@ -350,7 +428,7 @@ def main():
         )
         prepare_potcar(case_dir=case_dir, potcar_root=potcar_root, sym_potcar_map=sym_potcar_map)
 
-    prepare_job_array(out_dir=out_dir, job_cfg=job_cfg, sample_cfg=sample_cfg)
+    prepare_job_array(out_dir=out_dir, job_cfg=job_cfg, sample_cfg=sample_cfg, scheduler=args.scheduler)
     print(f"[Done] Prepared {sample_cfg.n_cases} cases in: {out_dir}")
 
 if __name__ == "__main__":

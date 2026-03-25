@@ -346,7 +346,7 @@ class InterfaceBuilder:
                 film_ratio = n_film_layers / float(fl)
                 sub_period_layers = int(round(sub_ratio))
                 film_period_layers = int(round(film_ratio))
-                # strict stacking consistency check (no rumpling allowed
+                # strict stacking consistency check (no rumpling allowed)
                 if abs(sub_ratio - sub_period_layers) > 1e-6:
                     raise RuntimeError(
                         f"Substrate stacking inconsistency detected: "
