@@ -21,12 +21,12 @@ class GridPoint:
     shift_a: float
     shift_b: float
     shift_c: float
-    fgw_score: float
+    fgw_distance: float
     registry: Interface
 
 @dataclass(frozen=True)
 class GridSampleConfig:
-    grid_a: int = 8
+    grid_a: int = 8 # 7x7 for KI/NaCl interface, and 8x8 for GaP/GaAs and GaN/Al2O3 interfaces
     grid_b: int = 8
     n_low: int = 8
     n_mid: int = 8
@@ -50,7 +50,7 @@ class RelaxConfig:
     lreal: Union[str, bool] = "Auto"
     lasph: bool = True
     ibrion: int = 2
-    nsw: int = 100
+    nsw: int = 12 # nsw=20 for pre-relaxation. nsw=12 for relaxation of GaP/GaAs. nsw=20 for relaxation of GaN/Al2O3
     potim: float = 0.05
     isif: int = 2
     ismear: int = 0
@@ -58,7 +58,7 @@ class RelaxConfig:
     isym: int = 0
     # Formal relaxation setting after pre-relaxation without dipole correction
     istart: int = 1
-    icharg: int = 0
+    icharg: int = 0 # istart=1, icharg=0 for formal relaxtion after pre-relaxtion. istart=1, icharg=1 for restart.
     ldipol: bool = True
     idipol: int = 3
     dipol: Optional[List[float]] = None
@@ -102,7 +102,7 @@ class SgeJobConfig:
 class SlurmJobConfig:
     job_name: str = "OPT"
     cores: int = 32
-    walltime: str = "48:00:00"
+    walltime: str = "24:00:00"
     mem_per_core: str = "4G"
 
 def scan_registry_grid(base_itf: Dict[str, Any], bo: RegistryPriorBO, cfg: GridSampleConfig):
@@ -127,7 +127,7 @@ def scan_registry_grid(base_itf: Dict[str, Any], bo: RegistryPriorBO, cfg: GridS
                             shift_a=float(a),
                             shift_b=float(b),
                             shift_c=shift_c,
-                            fgw_score=float(score),
+                            fgw_distance=float(score),
                             registry=reg,
                         )
                     )
@@ -136,7 +136,7 @@ def scan_registry_grid(base_itf: Dict[str, Any], bo: RegistryPriorBO, cfg: GridS
     if len(points) < cfg.n_cases:
         raise RuntimeError(f"Too few finite grid points to build a pool: {len(points)} < 24.")
 
-    points = sorted(points, key=lambda p: p.fgw_score)
+    points = sorted(points, key=lambda p: p.fgw_distance)
 
     return points
 
@@ -148,7 +148,7 @@ def select_cases(points: List[GridPoint], cfg: GridSampleConfig):
     mid_indices = np.linspace(0, len(mid_region)-1, cfg.n_mid, dtype=int)
     mid = [mid_region[i] for i in mid_indices]
     pool = low + mid + high
-    pool = sorted(pool, key=lambda p: p.fgw_score)
+    pool = sorted(pool, key=lambda p: p.fgw_distance)
     return pool
 
 def build_dipol(itf: Interface, idipol: int):
@@ -310,7 +310,7 @@ def main():
     p = argparse.ArgumentParser(
         description=(
             "Generate VASP inputs for interface registry sampling. "
-            "In-plane registries are evaluated on a grid using FGW structural compatibility scores, "
+            "In-plane registries are evaluated on a grid using FGW structural compatibility distances, "
             "and representative registries are selected for subsequent DFT validation."
         )
     )
@@ -372,14 +372,14 @@ def main():
 
     with summary_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["case", "shift_a", "shift_b", "shift_c", "fgw_score"])
+        writer.writerow(["case", "shift_a", "shift_b", "shift_c", "fgw_distance"])
         for i, point in enumerate(pool, start=1):
             writer.writerow([
                 i,
                 f"{point.shift_a:.3f}",
                 f"{point.shift_b:.3f}",
                 f"{point.shift_c + args.dft_gap_offset:.3f}",
-                f"{point.fgw_score:.12f}",
+                f"{point.fgw_distance:.12f}",
             ])
 
     # -----------------------------------------------------------------------------
@@ -402,7 +402,7 @@ def main():
         ref_reg = RegistryPriorBO.shift_film(ref_reg, shift_c=args.dft_gap_offset)
         dipol = build_dipol(ref_reg, idipol=incar_cfg.idipol)
         incar_cfg = replace(incar_cfg, dipol=dipol)
-        print(f"[Note] DIPOL set from reference structure: {dipol}")
+        print(f"[Note] DIPOL set from reference interface: {dipol}")
 
 
     if args.scheduler == "sge":
