@@ -26,8 +26,8 @@ class GridPoint:
 
 @dataclass(frozen=True)
 class GridSampleConfig:
-    grid_a: int = 8 # 7x7 for KI/NaCl interface, and 8x8 for GaP/GaAs and GaN/Al2O3 interfaces
-    grid_b: int = 8
+    grid_a: int = 7 # 7x7 for KI/NaCl interface, and 8x8 for GaP/GaAs and GaN/Al2O3 interfaces
+    grid_b: int = 7
     n_low: int = 8
     n_mid: int = 8
     n_high: int = 8
@@ -83,6 +83,8 @@ class StaticConfig:
     ismear: int = 0
     sigma: float = 0.05
     isym: int = 0
+    istart: int = 1
+    icharg: int = 1  # istart=1, icharg=1 for hard convergence.
     ldipol: bool = True
     idipol: int = 3
     dipol: Optional[List[float]] = None

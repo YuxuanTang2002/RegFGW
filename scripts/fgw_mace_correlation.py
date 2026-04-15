@@ -18,22 +18,31 @@ from mace.calculators import mace_mp
 
 @dataclass(frozen=True)
 class GridSampleConfig:
-    grid_a: int = 18
-    grid_b: int = 18
+    grid_a: int = 24 # 24x24 grid for GaP/GaAs and GaN/Al2O3 interfaces. 23x23 grid for KI/NaCl interface.
+    grid_b: int = 24
 
 def main():
     p = argparse.ArgumentParser(description="Sample uniform registry grid to check the correlation of fgw distance and mace relaxed energy.")
     p.add_argument("--record-json", required=True, help="Interface record JSON")
     p.add_argument("--embedding", required=True, help="Element embedding JSON/CSV")
     p.add_argument("--out-dir", required=True, help="Output directory")
+    p.add_argument("--mode", choices=["opt", "scf"], default="opt", help="opt mode for relaxation, scf mode for single-point energy calculation.")
     p.add_argument("--mace-model", type=str, default="medium")
     p.add_argument("--mace-device", type=str, default="cuda")
     p.add_argument("--mace-dtype", type=str, default="float32")
-    p.add_argument("--optimizer", default="fire", choices=["fire", "bfgs"])
     p.add_argument("--mace-gap-offset", type=float, default=0.0)
+    p.add_argument("--optimizer", default="fire", choices=["fire", "bfgs"])
     p.add_argument("--fmax", type=float, default=0.03)
     p.add_argument("--max-steps", type=int, default=300)
     args = p.parse_args()
+
+    if args.mode == "scf" and args.mace_gap_offset != 0.0:
+        raise ValueError(
+            "--mace-gap-offset is for opt mode. "
+            "In scf mode, single-point energies must be calculated at the same gap used in FGW distance computation "
+            "(i.e., 0 additional gap offset)."
+        )
+
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -76,12 +85,15 @@ def main():
     summary_path = out_dir / "fgw_mace_correlation.csv"
     fgw_ds = []
     energies = []
-
     opt_class = FIRE if args.optimizer == "fire" else BFGS
 
     with summary_path.open(mode="w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["shift_a", "shift_b", "shift_c", "fgw_distance", "relaxed_energy"])
+        if args.mode == "opt":
+            energy_col = "relaxed_energy"
+        else:
+            energy_col = "single_point_energy"
+        writer.writerow(["shift_a", "shift_b", "shift_c", "fgw_distance", energy_col])
         # Loop over registry grid
         with tqdm(total=total, desc="FGW & MACE calculating over uniform grid") as pbar:
             for a in grid_a:
@@ -108,14 +120,20 @@ def main():
                     atoms.pbc = (True, True, False)
                     atoms.wrap()
                     atoms.calc = calc
-                    optimizer = opt_class(atoms, logfile=None)
-                    try:
-                        with tqdm(total=int(args.max_steps), desc=f"Relax a={a:.3f}, b={b:.3f}", leave=False) as pbar_relax:
-                            optimizer.attach(lambda: pbar_relax.update(1), interval=1)
-                            converged = optimizer.run(fmax=float(args.fmax), steps=int(args.max_steps))
-                        energy = float(atoms.get_potential_energy()) if converged else None
-                    except (RuntimeError, ValueError, LinAlgError):
-                        energy = None
+                    if args.mode == "opt":
+                        optimizer = opt_class(atoms, logfile=None)
+                        try:
+                            with tqdm(total=int(args.max_steps), desc=f"Relax a={a:.3f}, b={b:.3f}", leave=False) as pbar_relax:
+                                optimizer.attach(lambda: pbar_relax.update(1), interval=1)
+                                converged = optimizer.run(fmax=float(args.fmax), steps=int(args.max_steps))
+                                energy = float(atoms.get_potential_energy()) if converged else None
+                        except (RuntimeError, ValueError, LinAlgError):
+                            energy = None
+                    else:
+                        try:
+                            energy = float(atoms.get_potential_energy())
+                        except (RuntimeError, ValueError, LinAlgError):
+                            energy = None
                     # If relaxtion failed, discard both FGW distance and MACE energy.
                     if energy is None:
                         writer.writerow([
@@ -150,7 +168,10 @@ def main():
         writer.writerow(["pearson", f"{pearson:.12f}"])
         writer.writerow(["spearman", f"{spearman:.12f}"])
 
-    print(f"[Done] FGW distances and MACE relaxed energies in {out_dir}")
+    if args.mode == "opt":
+        print(f"[Done] Write FGW distances and MACE relaxed energies in {out_dir}")
+    else:
+        print(f"[Done] Write FGW distances and MACE single-point energies in {out_dir}")
 
 if __name__ == "__main__":
     main()
