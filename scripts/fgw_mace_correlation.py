@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from monty.json import MontyDecoder
 from ase import Atoms
 from ase.optimize import FIRE, BFGS
+from ase.constraints import FixAtoms
 from pymatgen.io.ase import AseAtomsAdaptor
 from regfgw.fgw_metric import FGWBuilder, FGWBuildParams, FGWScorer, FGWScoreParams
 from regfgw.registry_bo import  BOParams, RegistryPriorBO
@@ -20,6 +21,42 @@ from mace.calculators import mace_mp
 class GridSampleConfig:
     grid_a: int = 24 # 24x24 grid for GaP/GaAs and GaN/Al2O3 interfaces. 23x23 grid for KI/NaCl interface.
     grid_b: int = 24
+
+def set_atomic_constraints(
+        atoms: Atoms,
+        substrate_indices,
+        film_indices,
+        free_sub_top_frac: float | None = None,
+        free_film_bottom_frac: float | None = None,
+):
+    z = np.asarray(atoms.positions[:, 2], dtype=float)
+    sub_idx = list(substrate_indices)
+    film_idx = list(film_indices)
+    fixed_indices = []
+
+    if free_sub_top_frac is not None:
+        if 0.0 <= free_sub_top_frac <= 1.0:
+            sub_z = z[sub_idx]
+            sub_z_min, sub_z_max = float(sub_z.min()), float(sub_z.max())
+            sub_free_threshold = sub_z_min + (sub_z_max - sub_z_min) * (1 - free_sub_top_frac)
+            for i in sub_idx:
+                if z[i] < sub_free_threshold:
+                    fixed_indices.append(i)
+        else:
+            raise ValueError("free_sub_top_frac must be between 0 and 1.")
+
+    if free_film_bottom_frac is not None:
+        if 0.0 <= free_film_bottom_frac <= 1.0:
+            film_z = z[film_idx]
+            film_z_min, film_z_max = float(film_z.min()), float(film_z.max())
+            film_free_threshold = film_z_min + (film_z_max - film_z_min) * free_film_bottom_frac
+            for i in film_idx:
+                if z[i] > film_free_threshold:
+                    fixed_indices.append(i)
+        else:
+            raise ValueError("free_film_bottom_frac must be between 0 and 1.")
+
+    atoms.set_constraint(FixAtoms(indices=sorted(set(fixed_indices))))
 
 def main():
     p = argparse.ArgumentParser(description="Sample uniform registry grid to check the correlation of fgw distance and mace relaxed energy.")
@@ -34,6 +71,8 @@ def main():
     p.add_argument("--optimizer", default="fire", choices=["fire", "bfgs"])
     p.add_argument("--fmax", type=float, default=0.03)
     p.add_argument("--max-steps", type=int, default=300)
+    p.add_argument("--free-sub-top-frac", type=float, default=0.5, help="Top fraction of substrate slab allowed to relax")
+    p.add_argument("--free-film-bottom-frac", type=float, default=0.5, help="Bottom fraction of film slab allowed to relax")
     args = p.parse_args()
 
     if args.mode == "scf" and args.mace_gap_offset != 0.0:
@@ -116,11 +155,20 @@ def main():
                         pbar.update(1)
                         continue
                     reg_relax = RegistryPriorBO.shift_film(reg, shift_c=args.mace_gap_offset)
+                    substrate_indices = reg_relax.substrate_indices
+                    film_indices = reg_relax.film_indices
                     atoms: Atoms = AseAtomsAdaptor.get_atoms(reg_relax)
                     atoms.pbc = (True, True, False)
                     atoms.wrap()
                     atoms.calc = calc
                     if args.mode == "opt":
+                        set_atomic_constraints(
+                            atoms=atoms,
+                            substrate_indices=substrate_indices,
+                            film_indices=film_indices,
+                            free_sub_top_frac=args.free_sub_top_frac,
+                            free_film_bottom_frac=args.free_film_bottom_frac,
+                        )
                         optimizer = opt_class(atoms, logfile=None)
                         try:
                             with tqdm(total=int(args.max_steps), desc=f"Relax a={a:.3f}, b={b:.3f}", leave=False) as pbar_relax:
