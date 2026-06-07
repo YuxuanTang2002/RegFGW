@@ -71,8 +71,8 @@ def main():
     p.add_argument("--optimizer", default="fire", choices=["fire", "bfgs"])
     p.add_argument("--fmax", type=float, default=0.03)
     p.add_argument("--max-steps", type=int, default=300)
-    p.add_argument("--free-sub-top-frac", type=float, default=0.5, help="Top fraction of substrate slab allowed to relax")
-    p.add_argument("--free-film-bottom-frac", type=float, default=0.5, help="Bottom fraction of film slab allowed to relax")
+    p.add_argument("--free-sub-top-frac", type=float, default=1.0, help="Top fraction of substrate slab allowed to relax")
+    p.add_argument("--free-film-bottom-frac", type=float, default=1.0, help="Bottom fraction of film slab allowed to relax")
     args = p.parse_args()
 
     if args.mode == "scf" and args.mace_gap_offset != 0.0:
