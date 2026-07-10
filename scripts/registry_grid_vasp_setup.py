@@ -5,6 +5,8 @@ import json
 import csv
 from tqdm import tqdm
 from ase import Atoms
+from ase.optimize import FIRE
+from mace.calculators import mace_mp
 from monty.json import MontyDecoder
 from dataclasses import dataclass, asdict, replace
 from typing import Any, Dict, List, Union, Optional
@@ -20,21 +22,21 @@ from regfgw.registry_bo import RegistryPriorBO, BOParams
 class GridPoint:
     shift_a: float
     shift_b: float
-    shift_c: float
+    shift_c_sp: float
+    shift_c_relax: float
     fgw_distance: float
+    mace_single_point_energy: float
+    mace_relaxed_energy: float
     registry: Interface
 
 @dataclass(frozen=True)
 class GridSampleConfig:
-    grid_a: int = 7 # 7x7 for KI/NaCl interface, and 8x8 for GaP/GaAs and GaN/Al2O3 interfaces
+    grid_a: int = 7
     grid_b: int = 7
-    n_low: int = 8
-    n_mid: int = 8
-    n_high: int = 8
 
     @property
     def n_cases(self):
-        return self.n_low + self.n_mid + self.n_high
+        return self.grid_a * self.grid_b
 
 @dataclass(frozen=True)
 class RelaxConfig:
@@ -50,7 +52,7 @@ class RelaxConfig:
     lreal: Union[str, bool] = "Auto"
     lasph: bool = True
     ibrion: int = 2
-    nsw: int = 12 # nsw=20 for pre-relaxation. nsw=12 for relaxation of GaP/GaAs. nsw=20 for relaxation of GaN/Al2O3
+    nsw: int = 5 # nsw=10 for pre-relaxation
     potim: float = 0.05
     isif: int = 2
     ismear: int = 0
@@ -107,51 +109,60 @@ class SlurmJobConfig:
     walltime: str = "24:00:00"
     mem_per_core: str = "4G"
 
-def scan_registry_grid(base_itf: Dict[str, Any], bo: RegistryPriorBO, cfg: GridSampleConfig):
-    shift_c = float(bo.suggest_shift_c(base_itf))
-    grid_a = np.arange(cfg.grid_a, dtype=float) / cfg.grid_a
-    grid_b = np.arange(cfg.grid_b, dtype=float) / cfg.grid_b
+def calculate_mace_sp_energy(itf: Interface, calc):
+    atoms: Atoms = AseAtomsAdaptor.get_atoms(itf)
+    atoms.calc = calc
+    return float(atoms.get_potential_energy())
+
+def calculate_mace_relaxed_energy(itf: Interface, calc):
+    atoms: Atoms = AseAtomsAdaptor.get_atoms(itf)
+    atoms.calc = calc
+    optimizer = FIRE(atoms, logfile=None)
+    optimizer.run(fmax=0.03, steps=300)
+    return float(atoms.get_potential_energy())
+
+def scan_registry_grid(
+        base_itf: Dict[str, Any],
+        bo: RegistryPriorBO,
+        cfg: GridSampleConfig,
+        calc,
+        gap_offset: float = 0.0):
+    shift_c_sp = float(bo.suggest_shift_c(base_itf))
+    shift_c_relax = shift_c_sp + gap_offset
+    grid_a = (np.arange(cfg.grid_a, dtype=float) + 0.5) / cfg.grid_a
+    grid_b = (np.arange(cfg.grid_b, dtype=float) + 0.5) / cfg.grid_b
     points: List[GridPoint] = []
     total = len(grid_a) * len(grid_b)
 
     with tqdm(total=total, desc="Scanning registry grid") as pbar:
         for a in grid_a:
             for b in grid_b:
-                score, reg = bo.score_registry(
+                score, reg_sp = bo.score_registry(
                     base_itf,
                     shift_a=float(a),
                     shift_b=float(b),
-                    shift_c=shift_c,
+                    shift_c=shift_c_sp,
                 )
-                if np.isfinite(score):
-                    points.append(
-                        GridPoint(
-                            shift_a=float(a),
-                            shift_b=float(b),
-                            shift_c=shift_c,
-                            fgw_distance=float(score),
-                            registry=reg,
-                        )
+                if not np.isfinite(score):
+                    raise RuntimeError(f"No valid FGW distance at shift_a={a:.3f}, shift_b={b:.3f}.")
+                mace_sp_energy = calculate_mace_sp_energy(reg_sp, calc)
+                reg_relax = RegistryPriorBO.shift_film(reg_sp, shift_c=gap_offset)
+                mace_relaxed_energy = calculate_mace_relaxed_energy(reg_relax, calc)
+                points.append(
+                    GridPoint(
+                        shift_a=float(a),
+                        shift_b=float(b),
+                        shift_c_sp=shift_c_sp,
+                        shift_c_relax=shift_c_relax,
+                        fgw_distance=float(score),
+                        mace_single_point_energy=mace_sp_energy,
+                        mace_relaxed_energy=mace_relaxed_energy,
+                        registry=reg_sp,
                     )
+                )
                 pbar.update(1)
 
-    if len(points) < cfg.n_cases:
-        raise RuntimeError(f"Too few finite grid points to build a pool: {len(points)} < 24.")
-
-    points = sorted(points, key=lambda p: p.fgw_distance)
-
     return points
-
-def select_cases(points: List[GridPoint], cfg: GridSampleConfig):
-    n = len(points)
-    low = list(points[:cfg.n_low])
-    high = list(points[-cfg.n_high:])
-    mid_region = list(points[cfg.n_low:n-cfg.n_high])
-    mid_indices = np.linspace(0, len(mid_region)-1, cfg.n_mid, dtype=int)
-    mid = [mid_region[i] for i in mid_indices]
-    pool = low + mid + high
-    pool = sorted(pool, key=lambda p: p.fgw_distance)
-    return pool
 
 def build_dipol(itf: Interface, idipol: int):
     if idipol not in (1, 2, 3):
@@ -311,9 +322,7 @@ echo "Finish: $(date)"
 def main():
     p = argparse.ArgumentParser(
         description=(
-            "Generate VASP inputs for interface registry sampling. "
-            "In-plane registries are evaluated on a grid using FGW structural compatibility distances, "
-            "and representative registries are selected for subsequent DFT validation."
+            "Generate VASP inputs for all interface registries on a centered unifrom grid."
         )
     )
     p.add_argument("--record-json", required=True, help="Interface record JSON")
@@ -330,6 +339,9 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"[Mode] Registry-grid {args.mode} VASP setup")
+
+    if args.dft_gap_offset != 0.0:
+        print(f"[Note] DFT gap offset enabled: {args.dft_gap_offset:.3f}Å will be applied.")
 
     with open(args.record_json, "r", encoding="utf-8") as f:
         record = json.load(f, cls=MontyDecoder)
@@ -352,36 +364,45 @@ def main():
             n_iter=60,
             acq_candidates=3000,
             seed=0,
-            xi=0.01,
+            xi=1e-6,
             penalty=1e6,
         ),
         structure_check=False,
     )
 
     # -----------------------------------------------------------------------------
-    # Grid scan and case selection
+    # Grid scan
     # -----------------------------------------------------------------------------
 
     sample_cfg = GridSampleConfig()
-    points = scan_registry_grid(record, bo, sample_cfg)
-    pool = select_cases(points, sample_cfg)
-
-    if args.dft_gap_offset != 0.0:
-        print(f"[Note] DFT gap offset enabled: {args.dft_gap_offset:.3f}Å will be applied.")
+    calc = mace_mp(model="medium", device="cuda", default_dtype="float32")
+    pool = scan_registry_grid(record, bo, sample_cfg, calc=calc, gap_offset=args.dft_gap_offset)
 
     # Write summary CSV
     summary_path = out_dir / "summary.csv"
 
     with summary_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["case", "shift_a", "shift_b", "shift_c", "fgw_distance"])
+        writer.writerow([
+            "case",
+            "shift_a",
+            "shift_b",
+            "shift_c_sp",
+            "shift_c_relax",
+            "fgw_distance",
+            "mace_single_point_energy",
+            "mace_relaxed_energy",
+        ])
         for i, point in enumerate(pool, start=1):
             writer.writerow([
                 i,
                 f"{point.shift_a:.3f}",
                 f"{point.shift_b:.3f}",
-                f"{point.shift_c + args.dft_gap_offset:.3f}",
+                f"{point.shift_c_sp:.3f}",
+                f"{point.shift_c_relax:.3f}",
                 f"{point.fgw_distance:.12f}",
+                f"{point.mace_single_point_energy:.12f}",
+                f"{point.mace_relaxed_energy:.12f}",
             ])
 
     # -----------------------------------------------------------------------------

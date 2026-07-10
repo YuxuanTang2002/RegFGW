@@ -15,7 +15,7 @@ from tqdm import tqdm
 from ase.io import write
 from ase.io.trajectory import Trajectory
 from ase.data import covalent_radii, vdw_radii
-from scipy.stats import norm
+from scipy.stats import norm, qmc
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern, ConstantKernel
 from .structure_to_graph import GraphEncoder
@@ -47,18 +47,18 @@ class BOParams:
 
     Attributes
     ----------
-    n_init: number of initial random registry samples
+    n_init: number of initial registry samples
     n_iter: number of BO refinement iterations
     acq_candidates: number of acquisition candidates per BO iteration
     seed: random seed for reproducibility
     xi: exploration parameter in expected improvement(ei)
     penalty: Large penalty assigned to geometrically invalid registries
     """
-    n_init: int = 20
-    n_iter: int = 60
-    acq_candidates: int = 3000
+    n_init: int = 8
+    n_iter: int = 50
+    acq_candidates: int = 4096
     seed: int = 0
-    xi: float = 0.01
+    xi: float = 1e-4
     penalty: float = 1e6
 
 # -----------------------------------------------------------------------------
@@ -93,6 +93,37 @@ class RegistryPriorBO:
     # -----------------------------------------------------------------------------
     # Registry manipulation utilities
     # -----------------------------------------------------------------------------
+
+    @staticmethod
+    def periodic_embedding(coord: np.ndarray):
+        """
+        Map fractional registry coordinates onto a periodic representation.
+
+        Parameters
+        ----------
+        coord: (n_samples, 2), shift_a and shift_b in [0, 1)
+
+        Returns
+        -------
+        (n_samples, 4), [cos(2πa), sin(2πa), cos(2πb), sin(2πb)]
+        """
+        coord = np.asarray(coord, dtype=float)
+
+        if coord.ndim == 1:
+            coord = coord.reshape(1, -1)
+
+        if coord.shape[1] != 2:
+            raise ValueError(f"Unexpected registry coordinates with shape {coord.shape}.")
+
+        shift_a = coord[:, 0]
+        shift_b = coord[:, 1]
+
+        return np.column_stack([
+            np.cos(2.0 * np.pi * shift_a),
+            np.sin(2.0 * np.pi * shift_a),
+            np.cos(2.0 * np.pi * shift_b),
+            np.sin(2.0 * np.pi * shift_b),
+        ])
 
     @staticmethod
     def shift_film(interface: Interface, shift_a: float = 0.0, shift_b: float = 0.0, shift_c: float = 0.0):
@@ -361,6 +392,7 @@ class RegistryPriorBO:
             out_best: bool = False,
             out_traj: bool = False,
             dft_gap_offset: float = 0.0,
+            shift_c: Optional[float] = None,
     ):
         """
         Perform Bayesian optimization over in-plane registry space.
@@ -398,11 +430,12 @@ class RegistryPriorBO:
             pdf = norm.pdf(z)
             return (best-mu-xi) * cdf + sigma * pdf
 
-        try:
-            shift_c = self.suggest_shift_c(interface)
-        except Exception as e:
-            shift_c = 0.0
-            print(f"[Warn] suggest_shift_c_interval failed. {type(e).__name__}: {e}. Keep as-built gap and continue.")
+        if shift_c is None:
+            try:
+                shift_c = self.suggest_shift_c(interface)
+            except Exception as e:
+                shift_c = 0.0
+                print(f"[Warn] suggest_shift_c_interval failed. {type(e).__name__}: {e}. Keep as-built gap and continue.")
 
         if self.structure_check:
             self.g_sub_bulk = None
@@ -411,11 +444,27 @@ class RegistryPriorBO:
 
         total_steps = self.params.n_init + self.params.n_iter
 
-        with tqdm(total=total_steps, desc="BO initialization") as pbar:
+        if self.params.n_init < 1:
+            raise ValueError("n_init must be at least 1.")
+
+        m = int(np.log2(self.params.n_init))
+        if 2 ** m != self.params.n_init:
+            raise ValueError(
+                "n_init must be a power of two when using Sobol initialization."
+            )
+
+        sobol = qmc.Sobol(
+            d=2,
+            scramble=True,
+            seed=self.params.seed,
+        )
+        initial_points = sobol.random_base2(m)
+
+        with tqdm(total=total_steps, desc="BO initialization", leave=False) as pbar:
             # Random initialization
-            for _ in range(self.params.n_init):
-                shift_a = float(rng.uniform(0.0, 1.0))
-                shift_b = float(rng.uniform(0.0, 1.0))
+            for shift_a, shift_b in initial_points:
+                shift_a = float(shift_a)
+                shift_b = float(shift_b)
                 score, reg = self.score_registry(interface, shift_a=shift_a, shift_b=shift_b, shift_c=shift_c)
                 step = len(records)
                 record = BORecord(step=step, score=score, registry=reg)
@@ -434,7 +483,11 @@ class RegistryPriorBO:
                 )
             pbar.set_description("BO refinement")
             # Gaussian Process surrogate
-            kernel = ConstantKernel(1.0, (1e-3, 1e3)) * Matern(length_scale=0.2, length_scale_bounds=(1e-3, 1e2), nu=2.5)
+            kernel = ConstantKernel(1.0, (1e-3, 1e3)) * Matern(
+                length_scale=np.ones(4),
+                length_scale_bounds=(1e-2, 10.0),
+                nu=1.5,
+            )
             gp = GaussianProcessRegressor(kernel=kernel, normalize_y=True, random_state=self.params.seed, alpha=1e-6)
             # BO refinement loop
             refine_finite = False
@@ -448,12 +501,14 @@ class RegistryPriorBO:
                         "Registry space likely dominated by invalid configureations."
                     )
                 else:
-                    gp.fit(x_array[mask], y_array[mask])
+                    x_train = self.periodic_embedding(x_array[mask])
+                    gp.fit(x_train, y_array[mask])
                 cand_a = rng.uniform(0.0, 1.0, size=self.params.acq_candidates)
                 cand_b = rng.uniform(0.0, 1.0, size=self.params.acq_candidates)
                 x_cand = np.stack([cand_a, cand_b], axis=1)
-                y_mu, y_sigma = gp.predict(x_cand, return_std=True)
-                y_best = float(np.min(y_array))
+                x_cand_train = self.periodic_embedding(x_cand)
+                y_mu, y_sigma = gp.predict(x_cand_train, return_std=True)
+                y_best = float(np.min(y_array[mask]))
                 ei = evaluate_expected_improvement(y_mu, y_sigma, y_best, float(self.params.xi))
                 best_idx = int(np.argmax(ei))
                 shift_a = float(x_cand[best_idx, 0])

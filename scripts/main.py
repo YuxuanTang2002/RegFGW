@@ -43,7 +43,7 @@ def main():
     p.add_argument("--bo-n-iter", type=int, default=60)
     p.add_argument("--bo-candidates", type=int, default=3000)
     p.add_argument("--bo-seed", type=int, default=0)
-    p.add_argument("--bo-xi", type=float, default=0.01)
+    p.add_argument("--bo-xi", type=float, default=1e-6)
     p.add_argument("--bo-penalty", type=float, default=1e6)
     # Output switches
     p.add_argument("--out-traj", action="store_true",
