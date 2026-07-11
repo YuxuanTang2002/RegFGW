@@ -8,7 +8,11 @@ version = "0.1.0"
 description = "Pre-screening of interface registry via graph-based FGW distance and Bayesian optimization"
 readme = "README.md"
 requires-python = ">=3.10"
-
+authors = [
+  {name = "Yuxuan Tang", email = "y.x.tang2002@gmail.com"}
+]
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
   "numpy>=1.23",
   "scipy>=1.10",
@@ -19,6 +23,9 @@ dependencies = [
   "pandas>=1.5",
   "POT>=0.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/YuxuanTang2002/RegFGW"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

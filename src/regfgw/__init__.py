@@ -2,7 +2,6 @@
 RegFGW: Pre-screening of the interface registry before DFT calculation
 via graph-based FGW distance and Bayesian optimization
 """
-__version__ = "0.1.0"
 
 from .interface_construction import ZSLParams, InterfaceParams, InterfaceBuilder
 from .structure_to_graph import GraphEncoder
