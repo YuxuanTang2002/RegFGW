@@ -17,9 +17,11 @@ from pymatgen.io.vasp.inputs import Poscar, Incar, Kpoints
 from regfgw.structure_to_graph import GraphEncoder
 from regfgw.fgw_metric import FGWBuilder, FGWBuildParams, FGWScorer, FGWScoreParams
 from regfgw.registry_bo import RegistryPriorBO, BOParams
+from regfgw.interface_equivalence import InterfaceMatcher, InterfaceMatchParams
 
 @dataclass(frozen=True)
 class GridPoint:
+    grid_index: int
     shift_a: float
     shift_b: float
     shift_c_sp: float
@@ -126,41 +128,67 @@ def scan_registry_grid(
         bo: RegistryPriorBO,
         cfg: GridSampleConfig,
         calc,
-        gap_offset: float = 0.0):
+        gap_offset: float = 0.0,
+        unique: bool = False,
+):
     shift_c_sp = float(bo.suggest_shift_c(base_itf))
     shift_c_relax = shift_c_sp + gap_offset
     grid_a = (np.arange(cfg.grid_a, dtype=float) + 0.5) / cfg.grid_a
     grid_b = (np.arange(cfg.grid_b, dtype=float) + 0.5) / cfg.grid_b
-    points: List[GridPoint] = []
-    total = len(grid_a) * len(grid_b)
+    # Construct all registry structures in the grid.
+    registries = []
 
-    with tqdm(total=total, desc="Scanning registry grid") as pbar:
-        for a in grid_a:
-            for b in grid_b:
-                score, reg_sp = bo.score_registry(
-                    base_itf,
+    for grid_index, (a, b) in enumerate(((a, b) for a in grid_a for b in grid_b), start=1):
+        registry = RegistryPriorBO.shift_film(
+            base_itf["interface"],
+            shift_a=float(a),
+            shift_b=float(b),
+            shift_c=shift_c_sp,
+        )
+        registries.append((grid_index, float(a), float(b), registry))
+
+    # Optionally retain one representative structure per equivalence class.
+    if unique:
+        matcher = InterfaceMatcher(
+            InterfaceMatchParams(
+                ltol=1e-5,
+                stol=1e-3,
+                angle_tol=1e-3,
+            )
+        )
+        groups = matcher.group_interfaces([registry[3] for registry in registries])
+        registries = [registries[group.rep_index] for group in groups]
+        print(f"[Unique] Reduce {cfg.n_cases} registries to {len(registries)} unique registries.")
+
+    points: List[GridPoint] = []
+
+    with tqdm(total=len(registries), desc="Scanning registry grid") as pbar:
+        for grid_index, a, b, _ in registries:
+            score, reg_sp = bo.score_registry(
+                base_itf,
+                shift_a=float(a),
+                shift_b=float(b),
+                shift_c=shift_c_sp,
+            )
+            if not np.isfinite(score):
+                raise RuntimeError(f"No valid FGW distance at shift_a={a:.3f}, shift_b={b:.3f}.")
+            mace_sp_energy = calculate_mace_sp_energy(reg_sp, calc)
+            reg_relax = RegistryPriorBO.shift_film(reg_sp, shift_c=gap_offset)
+            mace_relaxed_energy = calculate_mace_relaxed_energy(reg_relax, calc)
+            points.append(
+                GridPoint(
+                    grid_index=grid_index,
                     shift_a=float(a),
                     shift_b=float(b),
-                    shift_c=shift_c_sp,
+                    shift_c_sp=shift_c_sp,
+                    shift_c_relax=shift_c_relax,
+                    fgw_distance=float(score),
+                    mace_single_point_energy=mace_sp_energy,
+                    mace_relaxed_energy=mace_relaxed_energy,
+                    registry=reg_sp,
                 )
-                if not np.isfinite(score):
-                    raise RuntimeError(f"No valid FGW distance at shift_a={a:.3f}, shift_b={b:.3f}.")
-                mace_sp_energy = calculate_mace_sp_energy(reg_sp, calc)
-                reg_relax = RegistryPriorBO.shift_film(reg_sp, shift_c=gap_offset)
-                mace_relaxed_energy = calculate_mace_relaxed_energy(reg_relax, calc)
-                points.append(
-                    GridPoint(
-                        shift_a=float(a),
-                        shift_b=float(b),
-                        shift_c_sp=shift_c_sp,
-                        shift_c_relax=shift_c_relax,
-                        fgw_distance=float(score),
-                        mace_single_point_energy=mace_sp_energy,
-                        mace_relaxed_energy=mace_relaxed_energy,
-                        registry=reg_sp,
-                    )
-                )
-                pbar.update(1)
+            )
+            pbar.update(1)
 
     return points
 
@@ -329,7 +357,8 @@ def main():
     p.add_argument("--embedding", required=True, help="Element embedding JSON/CSV")
     p.add_argument("--potcar-root", required=True, help="Root directory of POTCAR library")
     p.add_argument("--out-dir", required=True, help="Output directory")
-    p.add_argument("--dft-gap-offset", type=float, default=0.0, help="Additional normal gap offset applied before structure output")
+    p.add_argument("--unique", action="store_true", help="Output one representative from each equivalent registry group.")
+    p.add_argument("--dft-gap-offset", type=float, default=0.0, help="Additional normal gap offset applied on initial structures")
     p.add_argument("--mode", choices=["opt", "scf"], default="opt")
     p.add_argument("--scheduler", choices=["sge", "slurm"], default="sge", help="Output job submission script for SGE or SLURM.")
     p.add_argument("--kspacing", type=float, default=0.25, help="Reciprocal-spcae k-point spacing")
@@ -360,11 +389,11 @@ def main():
         encoder=encoder,
         scorer=scorer,
         bo_params=BOParams(
-            n_init=20,
-            n_iter=60,
-            acq_candidates=3000,
+            n_init=8,
+            n_iter=50,
+            acq_candidates=4096,
             seed=0,
-            xi=1e-6,
+            xi=1e-4,
             penalty=1e6,
         ),
         structure_check=False,
@@ -376,7 +405,7 @@ def main():
 
     sample_cfg = GridSampleConfig()
     calc = mace_mp(model="medium", device="cuda", default_dtype="float32")
-    pool = scan_registry_grid(record, bo, sample_cfg, calc=calc, gap_offset=args.dft_gap_offset)
+    pool = scan_registry_grid(record, bo, sample_cfg, calc=calc, gap_offset=args.dft_gap_offset, unique=args.unique)
 
     # Write summary CSV
     summary_path = out_dir / "summary.csv"
@@ -393,9 +422,9 @@ def main():
             "mace_single_point_energy",
             "mace_relaxed_energy",
         ])
-        for i, point in enumerate(pool, start=1):
+        for point in pool:
             writer.writerow([
-                i,
+                point.grid_index,
                 f"{point.shift_a:.3f}",
                 f"{point.shift_b:.3f}",
                 f"{point.shift_c_sp:.3f}",
@@ -436,8 +465,8 @@ def main():
     potcar_root = Path(args.potcar_root)
     sym_potcar_map = {"Ga": "Ga_d", "Na": "Na_pv", "K": "K_pv"}
 
-    for i, point in enumerate(pool, start=1):
-        case_dir = out_dir / f"case{i:02d}"
+    for point in pool:
+        case_dir = out_dir / f"case{point.grid_index:02d}"
         case_dir.mkdir(parents=True, exist_ok=True)
         reg = point.registry
         reg = RegistryPriorBO.shift_film(reg, shift_c=args.dft_gap_offset)
@@ -451,8 +480,8 @@ def main():
         )
         prepare_potcar(case_dir=case_dir, potcar_root=potcar_root, sym_potcar_map=sym_potcar_map)
 
-    prepare_job_array(out_dir=out_dir, job_cfg=job_cfg, sample_cfg=sample_cfg, scheduler=args.scheduler)
-    print(f"[Done] Prepared {sample_cfg.n_cases} cases in: {out_dir}")
+    prepare_job_array(out_dir=out_dir, job_cfg=job_cfg,sample_cfg=sample_cfg, scheduler=args.scheduler)
+    print(f"[Done] Prepared {len(pool)} cases in: {out_dir}")
 
 if __name__ == "__main__":
     main()

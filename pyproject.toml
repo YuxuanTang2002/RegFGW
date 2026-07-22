@@ -22,7 +22,11 @@ dependencies = [
   "networkx>=3.0",
   "pandas>=1.5",
   "POT>=0.9",
+  "configargparse>=1.7",
 ]
+
+[project.scripts]
+regfgw_coherent = "regfgw.cli.coherent:main"
 
 [project.urls]
 Homepage = "https://github.com/YuxuanTang2002/RegFGW"

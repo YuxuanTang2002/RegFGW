@@ -66,7 +66,7 @@ def main():
     p.add_argument("--mace-model", type=str, default="medium")
     p.add_argument("--mace-device", type=str, default="cuda")
     p.add_argument("--mace-dtype", type=str, default="float32")
-    p.add_argument("--mace-gap-offset", type=float, default=0.0)
+    p.add_argument("--mace-gap-offset", type=float, default=0.0, help="Additional gap offset applied on initial structures.")
     p.add_argument("--optimizer", default="fire", choices=["fire", "bfgs"])
     p.add_argument("--fmax", type=float, default=0.03)
     p.add_argument("--max-steps", type=int, default=300)
@@ -74,14 +74,6 @@ def main():
     p.add_argument("--free-film-bottom-frac", type=float, default=1.0, help="Bottom fraction of film slab allowed to relax")
     p.add_argument("--output", choices=["fgw", "energy"], default="energy", help="Quantity to output")
     args = p.parse_args()
-
-    if args.mace_mode == "scf" and args.mace_gap_offset != 0.0:
-        raise ValueError(
-            "--mace-gap-offset is for opt mode. "
-            "In scf mode, single-point energies must be calculated at the same gap used in FGW distance computation "
-            "(i.e., 0 additional gap offset)."
-        )
-
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -95,7 +87,7 @@ def main():
     scorer = FGWScorer(
         builder=fgw_builder,
         score_params=FGWScoreParams(
-            alpha=0.5,
+            alpha=0.75,
             n_starts=80,
             init_seed=0,
         ),
@@ -104,11 +96,11 @@ def main():
         encoder=encoder,
         scorer=scorer,
         bo_params=BOParams(
-            n_init=20,
-            n_iter=60,
-            acq_candidates=3000,
+            n_init=8,
+            n_iter=50,
+            acq_candidates=4096,
             seed=0,
-            xi=1e-6,
+            xi=1e-4,
             penalty=1e6,
         ),
         structure_check=False,
@@ -165,15 +157,15 @@ def main():
                             score,
                         ])
                     else:
-                        reg_relax = RegistryPriorBO.shift_film(
+                        reg_mace = RegistryPriorBO.shift_film(
                             record["interface"],
                             shift_a=float(a),
                             shift_b=float(b),
                             shift_c=shift_c+args.mace_gap_offset,
                         )
-                        substrate_indices = reg_relax.substrate_indices
-                        film_indices = reg_relax.film_indices
-                        atoms: Atoms = AseAtomsAdaptor.get_atoms(reg_relax)
+                        substrate_indices = reg_mace.substrate_indices
+                        film_indices = reg_mace.film_indices
+                        atoms: Atoms = AseAtomsAdaptor.get_atoms(reg_mace)
                         atoms.pbc = (True, True, False)
                         atoms.wrap()
                         atoms.calc = calc

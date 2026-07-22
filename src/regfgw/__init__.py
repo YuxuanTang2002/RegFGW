@@ -7,3 +7,4 @@ from .interface_construction import ZSLParams, InterfaceParams, InterfaceBuilder
 from .structure_to_graph import GraphEncoder
 from .fgw_metric import FGWInputs, FGWBuildParams, FGWBuilder, FGWScoreParams, FGWScorer
 from .registry_bo import BORecord, BOParams, RegistryPriorBO
+from .interface_equivalence import InterfaceMatchParams, InterfaceGroup, InterfaceMatcher
