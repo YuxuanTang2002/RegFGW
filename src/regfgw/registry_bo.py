@@ -581,28 +581,3 @@ class RegistryPriorBO:
             traj.close()
 
         return best_record, out_records
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

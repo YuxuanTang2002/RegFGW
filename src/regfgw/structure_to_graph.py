@@ -422,4 +422,3 @@ class GraphEncoder:
         g_itf_film = self.atoms_to_graph(itf_atoms, film_pick_global, cutoff=cutoff)
 
         return g_itf_sub, g_itf_film
-
