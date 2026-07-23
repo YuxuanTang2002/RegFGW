@@ -50,7 +50,7 @@ def build_parser():
     parser.add_argument("--zsl-max-area", type=float, default=150.0, help="Maximum matched interface area in square angstrom")
     parser.add_argument("--zsl-area-ratio", type=float, default=0.06, help="Maximum relative area mismatch")
     parser.add_argument("--zsl-length", type=float, default=0.03, help="Maximum relative lattice-vector length mismatch")
-    parser.add_argument("--zsl-angle", type=float, default=0.02, help="Maximum relative lattive-vector angle mismatch")
+    parser.add_argument("--zsl-angle", type=float, default=0.02, help="Maximum relative lattice-vector angle mismatch")
     # FGW settings
     parser.add_argument("--fgw-metric", default="euclidean", help="Feature-space metric for FGW distance calculation")
     parser.add_argument("--fgw-alpha", type=float, default=0.5, help="Balance between structure and feature costs for FGW distance calculation")
@@ -62,9 +62,9 @@ def build_parser():
     parser.add_argument("--bo-candidates", type=int, default=4096, help="Number of acquisition-function candidates per BO iteration")
     parser.add_argument("--bo-seed", type=int, default=0, help="Random seed for BO")
     parser.add_argument("--bo-xi", type=float, default=1e-4, help="Exploration parameter for expected improvement")
-    parser.add_argument("--bo-penalty", type=float, default=1e6, help="Penalty assigned to invalid registries. Must substantially larger than valid FGW values.")
+    parser.add_argument("--bo-penalty", type=float, default=1e6, help="Penalty assigned to invalid registries. Must be substantially larger than valid FGW values.")
     # Outputs and diagnosis
-    parser.add_argument("--budget", type=int, default=1, help="Number of best registries to output per interface candidate")
+    parser.add_argument("--budget", type=int, default=3, help="Number of best registries to output per interface candidate")
     parser.add_argument("--unique", action="store_true", help="Only output structurally inequivalent registries per interface candidate.")
     parser.add_argument("--out-traj", action="store_true", help="Write BO sampled registries with FGW scores to .traj files.")
     parser.add_argument("--pipeline-check", action="store_true", help="Check intermediate structures generated in the pipeline.")
@@ -73,10 +73,10 @@ def build_parser():
 def validate_args(args: argparse.Namespace, parser: configargparse.ArgumentParser):
     """Validate parsed configuration before starting the workflow."""
     if args.mode == "optimize" and args.embedding is None:
-        parser.error("--embedding is required whem --mode optimize is used.")
+        parser.error("--embedding is required when --mode optimize is used.")
 
     if args.max_miller_idx <= 0:
-        parser.error("--max-miller must be positive.")
+        parser.error("--max-miller-idx must be positive.")
 
     if args.film_layers <=0:
         parser.error("--film-layers must be positive.")
@@ -91,34 +91,34 @@ def validate_args(args: argparse.Namespace, parser: configargparse.ArgumentParse
         parser.error("--vacuum must be positive.")
 
     if args.zsl_max_area <= 0.0:
-        parser.error("--zsl_max_area must be positive.")
+        parser.error("--zsl-max-area must be positive.")
 
     if args.zsl_area_ratio < 0.0:
-        parser.error("--zsl_area_ratio must be non-negative.")
+        parser.error("--zsl-area-ratio must be non-negative.")
 
     if args.zsl_length < 0.0:
-        parser.error("--zsl_length must be non-negative.")
+        parser.error("--zsl-length must be non-negative.")
 
     if args.zsl_angle < 0.0:
-        parser.error("--zsl_angle must be non-negative.")
+        parser.error("--zsl-angle must be non-negative.")
 
     if not 0.0 <= args.fgw_alpha <= 1.0:
-        parser.error("--fgw_alpha must be between 0.0 and 1.0.")
+        parser.error("--fgw-alpha must be between 0.0 and 1.0.")
 
     if args.fgw_n_starts <= 0:
-        parser.error("--fgw_n_starts must be positive.")
+        parser.error("--fgw-n-starts must be positive.")
 
     if args.bo_n_init <= 0:
-        parser.error("--bo_n_init must be positive.")
+        parser.error("--bo-n-init must be positive.")
 
     if args.bo_n_iter <= 0:
-        parser.error("--bo_n_iter must be positive.")
+        parser.error("--bo-n-iter must be positive.")
 
     if args.bo_xi < 0.0:
-        parser.error("--bo_xi must be non-negative.")
+        parser.error("--bo-xi must be non-negative.")
 
     if args.bo_penalty <= 0.0:
-        parser.error("--bo_penalty must be positive.")
+        parser.error("--bo-penalty must be positive.")
 
     if args.budget < 1:
         parser.error("--budget must be at least 1.")
@@ -145,7 +145,8 @@ def print_interface_candidates(interfaces: List[Dict[str, Any]]):
     for index, interface in enumerate(interfaces, start=1):
         print(
             f"[{index}] "
-            f"miller={interface['substrate_miller']}/{interface['film_miller']} "
+            f"sub={interface['substrate_miller']} "
+            f"film={interface['film_miller']} "
             f"term={interface['termination']} "
             f"cand={interface['cand_id']} "
             f"area={interface['area']:.2f} Å²"
@@ -153,7 +154,7 @@ def print_interface_candidates(interfaces: List[Dict[str, Any]]):
 
 def select_interface_candidates(interfaces: List[Dict[str, Any]]):
     """Prompt the user to select interface candidates for BO optimization."""
-    print("[Input] Enter 'all' or candidate numers, e.g. 1,3,5 ")
+    print("[Input] Enter 'all' or candidate numbers, e.g. 1,3,5")
 
     while True:
         selection = input("[Input] Select candidates: ").strip()
@@ -236,7 +237,7 @@ def run(args: argparse.Namespace):
     for interface in tqdm(selected_candidates, desc="Optimizing interfaces"):
         bo.bayes_optimize_registry(
             interface,
-            budgets=args.budget,
+            budget=args.budget,
             unique=args.unique,
             out_traj=args.out_traj,
             dft_gap_offset=args.dft_gap_offset,

@@ -80,8 +80,8 @@ class InterfaceBuilder:
         zsl_params: ZSL lattice matching tolerances
         interface_params: Slab thickness, gap and vacuum used for interface construction
         """
-        self.substrate = self.standarize_struct(substrate)
-        self.film = self.standarize_struct(film)
+        self.substrate = self.standardize_struct(substrate)
+        self.film = self.standardize_struct(film)
         self.max_miller_idx = max_miller_idx
         self.zsl_params = zsl_params
         self.interface_params = interface_params
@@ -103,16 +103,16 @@ class InterfaceBuilder:
     # -------------------------------------------------------------------------
 
     @staticmethod
-    def standarize_struct(struct: Structure):
+    def standardize_struct(struct: Structure):
         try:
             sga = SpacegroupAnalyzer(struct, symprec=1e-2, angle_tolerance=5.0)
             std = sga.get_conventional_standard_structure()
             if std is None:
-                print("[WARN] spglib standarization returned None. Proceeding with original structure.")
+                print("[WARN] spglib standardization returned None. Proceeding with original structure.")
                 return struct
             return std
         except Exception as e:
-            print(f"[WARN] spalib standarization raised {type(e).__name__}: {e}. Proceeding with original structure.")
+            print(f"[WARN] spglib standardization raised {type(e).__name__}: {e}. Proceeding with original structure.")
             return struct
 
     @staticmethod
@@ -217,9 +217,9 @@ class InterfaceBuilder:
                 substrate_thickness=substrate_layers,
                 film_thickness=film_layers,
             ))
-        except LinAlgError as e:
+        except (ValueError, LinAlgError) as e:
             print(
-                "[WARN] Skipping interface candidates due to LinAlgError (likely singular supercell transform). "
+                "[WARN] Skipping interface candidates due to "
                 f"{type(e).__name__}: {e}"
             )
             return []
@@ -352,19 +352,19 @@ class InterfaceBuilder:
                         f"Substrate stacking inconsistency detected: "
                         f"n_sub_layers={n_sub_layers}, sub_layers={sl}, "
                         f"ratio={sub_ratio:.6f} (non-integer). "
-                        f"Rumbling or structural distortion not supported."
+                        f"Rumpling or structural distortion not supported."
                     )
                 if abs(film_ratio - film_period_layers) > 1e-6:
                     raise RuntimeError(
                         f"Film stacking inconsistency detected: "
                         f"n_film_layers={n_film_layers}, film_layers={fl}, "
                         f"ratio={film_ratio:.6f} (non-integer). "
-                        f"Rumbling or structural distortion not supported."
+                        f"Rumpling or structural distortion not supported."
                     )
                 records.append({
                     "substrate_miller": [int(x) for x in sub_m],
                     "film_miller": [int(x) for x in film_m],
-                    "termination": [str(term[0]), str(term[1])],
+                    "termination": [str(term[1]), str(term[0])],
                     "cand_id": int(i),
                     "interface": itf_use,
                     "area": float(area),
@@ -397,7 +397,7 @@ class InterfaceBuilder:
             for rec in records:
                 s = rec["substrate_miller"]
                 f = rec["film_miller"]
-                f_t, s_t = rec["termination"]
+                s_t, f_t = rec["termination"]
                 sub_tag = f"{s[0]}{s[1]}{s[2]}"
                 film_tag = f"{f[0]}{f[1]}{f[2]}"
                 f_t = f_t.replace("/", "-")

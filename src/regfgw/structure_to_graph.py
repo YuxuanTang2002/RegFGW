@@ -329,7 +329,7 @@ class GraphEncoder:
         cand_id = interface["cand_id"]
         sub_tag = f"{s[0]}{s[1]}{s[2]}"
         film_tag = f"{f[0]}{f[1]}{f[2]}"
-        f_t, s_t = t
+        s_t, f_t = t
         f_t = f_t.replace("/", "-")
         s_t = s_t.replace("/", "-")
         term_tag = f"{s_t}_{f_t}"

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Dict, Any, List, Optional
 from pymatgen.core.interface import Interface
 from pymatgen.io.ase import AseAtomsAdaptor
-from ase import  Atoms
+from ase import Atoms
 from tqdm import tqdm
 from ase.io import write
 from ase.io.trajectory import Trajectory
@@ -34,7 +34,7 @@ class BORecord:
     Attributes
     ----------
     step: optimization step
-    score: registry fgw score (lower is more bulk-like)
+    score: registry FGW score (lower is more bulk-like)
     registry: shifted interface structure evaluated at this step
     """
     step: int
@@ -44,7 +44,7 @@ class BORecord:
 @dataclass(frozen=True)
 class BOParams:
     """
-    Hyperparameters controlling Bayesian optimization(BO)
+    Hyperparameters controlling Bayesian optimization (BO)
 
     Attributes
     ----------
@@ -52,8 +52,8 @@ class BOParams:
     n_iter: number of BO refinement iterations
     acq_candidates: number of acquisition candidates per BO iteration
     seed: random seed for reproducibility
-    xi: exploration parameter in expected improvement(ei)
-    penalty: Large penalty assigned to geometrically invalid registries
+    xi: exploration parameter in expected improvement (EI)
+    penalty: large penalty assigned to geometrically invalid registries
     """
     n_init: int = 8
     n_iter: int = 50
@@ -72,10 +72,10 @@ class RegistryPriorBO:
 
     Notes
     -----
-    1) The search space consists of fractional in-plane transitions (shift_a, shift_b) applied to the film slab.
+    1) The search space consists of fractional in-plane translations (shift_a, shift_b) applied to the film slab.
     2) The objective function is defined as:
     FGW(graph(interface_substrate_side), graph(substrate_bulk_reference)) + FGW(graph(interface_film_side), graph(film_bulk_reference))
-    3) physical continuity constraints are enforced prior to scoring to exclude unexpected atomic overlaps or broken interfacial bonding.
+    3) Physical continuity constraints are enforced prior to scoring to exclude unexpected atomic overlaps or broken interfacial bonding.
     """
     def __init__(
             self,
@@ -170,7 +170,7 @@ class RegistryPriorBO:
         dict{
         "sub_indices": list[int],
         "film_indices": list[int],
-        "sub_nums: np.ndarray",
+        "sub_nums": np.ndarray",
         "film_nums": np.ndarray,
         "cov_sum": np.ndarray, # shape = (n_sub, n_film)
         "vdw_sum": np.ndarray, # shape = (n_sub, n_film)
@@ -184,7 +184,7 @@ class RegistryPriorBO:
         film_indices = [j for j in itf.film_indices if (c_all[j] - film_c_min) <= 3.0]
 
         if not sub_indices or not film_indices:
-            raise ValueError("No atoms in interface window")
+            raise ValueError("No atoms were found in interface window.")
 
         atom_nums = np.array([s.specie.Z for s in itf.sites], dtype=int)
         sub_nums = atom_nums[sub_indices]
@@ -233,7 +233,7 @@ class RegistryPriorBO:
         """
         Enforce physical continuity constraints at the interface
 
-        check:
+        Check:
         1) No interatomic distance smaller than covalent radius sum (avoid atomic overlap)
         2) Sufficient interfacial contact within van der Waals range
 
@@ -288,7 +288,7 @@ class RegistryPriorBO:
         grid = [0.0, 0.25, 0.5, 0.75]
         ref_registries = [(a, b) for a in grid for b in grid]
         ref_shift_cs: List[float] = []
-        total_steps =len(ref_registries) * len(scan_grid)
+        total_steps = len(ref_registries) * len(scan_grid)
 
         with tqdm(total=total_steps, desc="Near-contact scanning") as pbar:
             for shift_a, shift_b in ref_registries:
@@ -323,7 +323,7 @@ class RegistryPriorBO:
                 ref_shift_cs.append(found_shift_c)
 
         suggested_shift_c = float(np.median(ref_shift_cs))
-        tqdm.write(f"Suggested shift_c: {suggested_shift_c:.6f}Å")
+        tqdm.write(f"Suggested shift_c: {suggested_shift_c:.6f} Å")
 
         return suggested_shift_c
 
@@ -351,7 +351,7 @@ class RegistryPriorBO:
 
         Returns
         -------
-        score: float, returns inf if physical constraints fails
+        score: float, returns inf if physical constraints fail
         shifted_itf: Interface, shifted interface structure
         """
         if self.g_sub_bulk is None or self.g_film_bulk is None:
@@ -390,7 +390,7 @@ class RegistryPriorBO:
     def bayes_optimize_registry(
             self,
             interface: Dict[str, Any],
-            budget: int =1,
+            budget: int = 3,
             unique: bool = False,
             out_traj: bool = False,
             dft_gap_offset: float = 0.0,
@@ -408,7 +408,7 @@ class RegistryPriorBO:
         ---------
         1) Random initialization (n_init samples)
         2) Fit Gaussian Process surrogate model.
-        3) Maximum ei acquisition.
+        3) Maximum EI acquisition.
         4) Evaluate selected registry.
         5) Repeat for n_iter iterations.
 
@@ -445,7 +445,7 @@ class RegistryPriorBO:
                 shift_c = self.suggest_shift_c(interface)
             except Exception as e:
                 shift_c = 0.0
-                print(f"[Warn] suggest_shift_c_interval failed. {type(e).__name__}: {e}. Keep as-built gap and continue.")
+                print(f"[Warn] suggest_shift_c failed. {type(e).__name__}: {e}. Keep as-built gap and continue.")
 
         if self.structure_check:
             self.g_sub_bulk = None
@@ -485,7 +485,7 @@ class RegistryPriorBO:
                 pbar.update(1)
             if best_record is None:
                 raise RuntimeError(
-                    "All initial samples failed (score=inf)."
+                    "All initial samples failed (score=inf). "
                     "No registry passed check_registry_continuity, BO cannot proceed."
                 )
             pbar.set_description("BO refinement")
@@ -505,7 +505,7 @@ class RegistryPriorBO:
                 if np.count_nonzero(mask) < 3:
                     raise RuntimeError(
                         "Too few valid registries to fit GP model. "
-                        "Registry space likely dominated by invalid configureations."
+                        "Registry space likely dominated by invalid configurations."
                     )
                 else:
                     x_train = self.periodic_embedding(x_array[mask])
@@ -535,7 +535,7 @@ class RegistryPriorBO:
                 pbar.update(1)
             if not refine_finite:
                 raise RuntimeError(
-                    "All refinement samples failed (score=inf)."
+                    "All refinement samples failed (score=inf). "
                     "No registry passed check_registry_continuity, BO cannot proceed."
                 )
 
