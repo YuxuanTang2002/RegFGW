@@ -31,9 +31,6 @@ regfgw_coherent = "regfgw.cli.coherent:main"
 [project.urls]
 Homepage = "https://github.com/YuxuanTang2002/RegFGW"
 
-[project.scripts]
-regfgw_coherent = "regfgw.cli.coherent:main"
-
 [tool.setuptools]
 package-dir = {"" = "src"}
 
