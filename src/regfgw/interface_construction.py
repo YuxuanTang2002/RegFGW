@@ -447,10 +447,3 @@ class InterfaceBuilder:
                     records.extend(recs)
 
         return records
-
-
-
-
-
-
-

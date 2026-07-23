@@ -29,3 +29,6 @@ data/potentials_PBE_54/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Operating systems
+.DS_Store
