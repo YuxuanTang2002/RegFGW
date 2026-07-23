@@ -20,6 +20,7 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern, ConstantKernel
 from .structure_to_graph import GraphEncoder
 from .fgw_metric import FGWScorer
+from .interface_equivalence import InterfaceMatcher, InterfaceMatchParams
 
 # -----------------------------------------------------------------------------
 # Parameter containers
@@ -389,7 +390,8 @@ class RegistryPriorBO:
     def bayes_optimize_registry(
             self,
             interface: Dict[str, Any],
-            out_best: bool = False,
+            budget: int =1,
+            unique: bool = False,
             out_traj: bool = False,
             dft_gap_offset: float = 0.0,
             shift_c: Optional[float] = None,
@@ -412,9 +414,17 @@ class RegistryPriorBO:
 
         Returns
         -------
-        best_record: BORecord
-        records: List[BORecord], full optimization trajectory
+        records: List[BORecord]
         """
+        if budget < 1:
+            raise ValueError("budget must be at least 1.")
+
+        if self.params.n_init < 1:
+            raise ValueError("n_init must be at least 1.")
+
+        if self.params.n_iter < 1:
+            raise ValueError("n_iter must be at least 1.")
+        
         self.g_sub_bulk = None
         self.g_film_bulk = None
         rng = np.random.default_rng(self.params.seed)
@@ -443,11 +453,8 @@ class RegistryPriorBO:
             self.score_registry(interface, shift_c=shift_c, structure_check=True)
 
         total_steps = self.params.n_init + self.params.n_iter
-
-        if self.params.n_init < 1:
-            raise ValueError("n_init must be at least 1.")
-
         m = int(np.log2(self.params.n_init))
+
         if 2 ** m != self.params.n_init:
             raise ValueError(
                 "n_init must be a power of two when using Sobol initialization."
@@ -532,16 +539,39 @@ class RegistryPriorBO:
                     "No registry passed check_registry_continuity, BO cannot proceed."
                 )
 
-        # Optional structure output
-        if out_best:
-            base_path = self.enc.build_base_path(interface)
-            cif_path = f"{base_path}_initial.cif"
-            best_reg = self.shift_film(best_record.registry, shift_c=dft_gap_offset)
-            best_reg = AseAtomsAdaptor.get_atoms(best_reg)
-            write(cif_path, best_reg)
+        out_records = [record for record in records if np.isfinite(record.score)]
+
+        if unique:
+            matcher = InterfaceMatcher(
+                InterfaceMatchParams(
+                    ltol=1e-5,
+                    stol=1e-3,
+                    angle_tol=1e-3,
+                )
+            )
+            groups = matcher.group_interfaces([record.registry for record in out_records])
+            out_records = [out_records[group.rep_index] for group in groups]
+            print(f"[Unique] Reduce {len(records)} registries to {len(out_records)} unique registries.")
+
+        out_records.sort(key=lambda record: record.score)
+
+        if len(out_records) < budget:
+            print(
+                f"[Warn] Requested {budget} structures, but only "
+                f"{len(out_records)} valid"
+                f"{' unique' if unique else ''} registries are available."
+            )
+
+        out_records = out_records[:budget]
+        base_path = self.enc.build_base_path(interface)
+
+        for out_idx, record in enumerate(out_records):
+            registry = self.shift_film(record.registry, shift_c=dft_gap_offset)
+            atoms: Atoms = AseAtomsAdaptor.get_atoms(registry)
+            cif_path = f"{base_path}_initial_{out_idx}.cif"
+            write(cif_path, atoms)
 
         if out_traj:
-            base_path = self.enc.build_base_path(interface)
             traj_path = f"{base_path}.traj"
             traj = Trajectory(traj_path, mode="w")
             for record in records:
@@ -550,7 +580,7 @@ class RegistryPriorBO:
                 traj.write(atoms)
             traj.close()
 
-        return best_record, records
+        return best_record, out_records
 
 
 
