@@ -21,11 +21,11 @@ from .structure_to_graph import GraphEncoder
 @dataclass(frozen=True)
 class ZSLParams:
     """
-    Parameters control Zur-McGill lattice(ZSL) matching for coherent interfaces.
+    Parameters for Zur-McGill lattice (ZSL) matching of coherent interfaces.
 
     Attributes
     ----------
-    max_area: Maximum allowed in-plane coincidence supercell area(Å^2)
+    max_area: Maximum allowed in-plane coincidence supercell area (Å²)
     max_area_ratio_tol: Relative tolerance for film/substrate in-plane area ratio
     max_length_tol: Relative tolerance for matching in-plane lattice vector lengths
     max_angle_tol: Absolute tolerance for matching in-plane lattice vector angles
@@ -35,6 +35,19 @@ class ZSLParams:
     max_length_tol: float = 0.03
     max_angle_tol: float = 0.02
 
+    def __post_init__(self):
+        if self.max_area <= 0.0:
+            raise ValueError("max_area must be positive.")
+
+        if self.max_area_ratio_tol < 0.0:
+            raise ValueError("max_area_ratio_tol must be non-negative.")
+
+        if self.max_length_tol < 0.0:
+            raise ValueError("max_length_tol must be non-negative.")
+
+        if self.max_angle_tol < 0.0:
+            raise ValueError("max_angle_tol must be non-negative.")
+
 @dataclass(frozen=True)
 class InterfaceParams:
     """
@@ -43,12 +56,26 @@ class InterfaceParams:
     Attributes
     ----------
     film_layers, substrate_layers: Slab thickness controls. One layer corresponds to the minimum stacking repeat period.
-    vacuum: Vacuum thickness above film slab(Å)
+    gap: Interfacial gap (Å)
+    vacuum: Vacuum thickness above film slab (Å)
     """
     film_layers: int = 3
     substrate_layers: int = 3
     gap: float = 5.0
     vacuum: float = 20.0
+
+    def __post_init__(self):
+        if self.film_layers < 1:
+            raise ValueError("film_layers must be at least 1.")
+
+        if self.substrate_layers < 1:
+            raise ValueError("substrate_layers must be at least 1.")
+
+        if self.gap < 0.0:
+            raise ValueError("gap must be non-negative.")
+
+        if self.vacuum <= 0.0:
+            raise ValueError("vacuum must be positive.")
 
 # -----------------------------------------------------------------------------
 # Main builder
@@ -61,35 +88,36 @@ class InterfaceBuilder:
     Workflow
     --------
     1) Enumerate symmetrically distinct Miller indices for substrate and film.
-    2) Build a CoherentInterfaceBuilder(CIB) for each Miller index pair.
+    2) Build a CoherentInterfaceBuilder (CIB) for each Miller index pair.
     3) Loop over terminations and build interface candidates.
     4) (Optional) Build orientation-consistent bulk references(film/substrate slabs) for bulk-based descriptors.
     """
     def __init__(
             self,
             substrate: Structure, film: Structure,
-            max_miller_idx=1,
+            max_miller_idx: int = 1,
             zsl_params=ZSLParams(),
             interface_params=InterfaceParams(),
     ):
         """
         Parameters
         ----------
-        substrate, film: Bulk unit cells(pymatgen Structure) forming the two sides of the interface
+        substrate, film: Bulk unit cells (pymatgen Structure) forming the two sides of the interface
         max_miller_idx: Maximum Miller index for enumerating distinct facets
         zsl_params: ZSL lattice matching tolerances
         interface_params: Slab thickness, gap and vacuum used for interface construction
         """
+        if max_miller_idx < 1:
+            raise ValueError("max_miller_idx must be at least 1.")
+
         self.substrate = self.standardize_struct(substrate)
         self.film = self.standardize_struct(film)
         self.max_miller_idx = max_miller_idx
         self.zsl_params = zsl_params
         self.interface_params = interface_params
-
         # Enumerate symmetrically distinct Miller indices to reduce redundant facets.
         self.s_indices = get_symmetrically_distinct_miller_indices(self.substrate, max_index=self.max_miller_idx)
         self.f_indices = get_symmetrically_distinct_miller_indices(self.film, max_index=self.max_miller_idx)
-
         # ZSL generator defines admissible coincidence lattices.
         self.zsl = ZSLGenerator(
             max_area=self.zsl_params.max_area,
@@ -122,7 +150,7 @@ class InterfaceBuilder:
 
         Notes
         -----
-        Pymatgen slab convention: a, b are in-plane, c is surface normal(z)
+        Pymatgen slab convention: a, b are in-plane, c is surface normal (z)
         """
         a_vec, b_vec = interface.lattice.matrix[0], interface.lattice.matrix[1]
         area = float(vec_area(a_vec, b_vec))
@@ -199,13 +227,19 @@ class InterfaceBuilder:
 
         Returns
         -------
-        list[Structure]: All candidates returned by 'cib.get_interface()' for specific termination
+        list[Structure]: All candidates returned by 'cib.get_interfaces()' for specific termination
         """
         if film_layers is None:
             film_layers = self.interface_params.film_layers
 
         if substrate_layers is None:
             substrate_layers = self.interface_params.substrate_layers
+
+        if film_layers < 1:
+            raise ValueError("film_layers must be at least 1.")
+
+        if substrate_layers < 1:
+            raise ValueError("substrate_layers must be at least 1.")
 
         gap = self.interface_params.gap
 
@@ -272,7 +306,7 @@ class InterfaceBuilder:
             f = self.mirror_along_normal(f, itf.substrate_indices)
 
         if flip_film:
-            f =  self.mirror_along_normal(f, itf.film_indices)
+            f = self.mirror_along_normal(f, itf.film_indices)
 
         f[:, :2] = f[:, :2] % 1.0
 
@@ -297,7 +331,7 @@ class InterfaceBuilder:
     ):
         """
         Build full candidate records for a given (substrate_miller, film_miller, termination).
-        Enumerate flips tp avoid missing termination combinations.
+        Enumerate flips to avoid missing termination combinations.
 
         Returns
         -------
@@ -307,7 +341,7 @@ class InterfaceBuilder:
         * termination
         * cand_id: 0, ..., N-1
         * interface: Structure
-        * area: Å^2
+        * area: Å²
         * substrate_bulk(optional): Structure
         * film_bulk(Optional): Structure
         * sub_period_layers / film_period_layers: int: the number of z-coplanar atomic layers

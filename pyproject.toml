@@ -25,6 +25,9 @@ dependencies = [
   "configargparse>=1.7",
 ]
 
+[project.optional-dependencies]
+test = ["pytest"]
+
 [project.scripts]
 regfgw_coherent = "regfgw.cli.coherent:main"
 
