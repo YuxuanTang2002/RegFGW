@@ -43,22 +43,22 @@ def build_parser():
     parser.add_argument("--max-miller-idx", type=int, default=1, help="Maximum absolute Miller index used for surface enumeration")
     parser.add_argument("--film-layers", type=int, default=3, help="Number of film layers in each interface candidate")
     parser.add_argument("--substrate-layers", type=int, default=3, help="Number of substrate layers in each interface candidate")
-    parser.add_argument("--gap", type=float, default=5.0, help="Initial interfacial gap in angstrom")
-    parser.add_argument("--dft-gap-offset", type=float, default=0.0, help="Additional normal gap offset in angstrom applied before structure output")
-    parser.add_argument("--vacuum", type=float, default=20.0, help="Vacuum thickness in angstrom")
+    parser.add_argument("--gap", type=float, default=5.0, help="Initial interfacial gap in Å")
+    parser.add_argument("--dft-gap-offset", type=float, default=0.0, help="Additional normal gap offset in Å applied before structure output")
+    parser.add_argument("--vacuum", type=float, default=20.0, help="Vacuum thickness in Å")
     # ZSL tolerances
-    parser.add_argument("--zsl-max-area", type=float, default=150.0, help="Maximum matched interface area in square angstrom")
+    parser.add_argument("--zsl-max-area", type=float, default=150.0, help="Maximum matched interface area in Å²")
     parser.add_argument("--zsl-area-ratio", type=float, default=0.06, help="Maximum relative area mismatch")
     parser.add_argument("--zsl-length", type=float, default=0.03, help="Maximum relative lattice-vector length mismatch")
     parser.add_argument("--zsl-angle", type=float, default=0.02, help="Maximum relative lattice-vector angle mismatch")
     # FGW settings
     parser.add_argument("--fgw-metric", default="euclidean", help="Feature-space metric for FGW distance calculation")
-    parser.add_argument("--fgw-alpha", type=float, default=0.5, help="Balance between structure and feature costs for FGW distance calculation")
+    parser.add_argument("--fgw-alpha", type=float, default=0.5, help="Weight of the structural cost in FGW, the weight of the feature cost is 1-alpha")
     parser.add_argument("--fgw-n-starts", type=int, default=80, help="Number of FGW initializations")
     parser.add_argument("--fgw-seed", type=int, default=0, help="Random seed for FGW initialization")
     # BO settings
     parser.add_argument("--bo-n-init", type=int, default=8, help="Number of initial BO observations")
-    parser.add_argument("--bo-n-iter", type=int, default=50, help="Number of BO iterations")
+    parser.add_argument("--bo-n-iter", type=int, default=50, help="Number of BO refinement iterations")
     parser.add_argument("--bo-candidates", type=int, default=4096, help="Number of acquisition-function candidates per BO iteration")
     parser.add_argument("--bo-seed", type=int, default=0, help="Random seed for BO")
     parser.add_argument("--bo-xi", type=float, default=1e-4, help="Exploration parameter for expected improvement")
@@ -67,61 +67,13 @@ def build_parser():
     parser.add_argument("--budget", type=int, default=3, help="Number of best registries to output per interface candidate")
     parser.add_argument("--unique", action="store_true", help="Only output structurally inequivalent registries per interface candidate.")
     parser.add_argument("--out-traj", action="store_true", help="Write BO sampled registries with FGW scores to .traj files.")
-    parser.add_argument("--pipeline-check", action="store_true", help="Check intermediate structures generated in the pipeline.")
+    parser.add_argument("--pipeline-check", action="store_true", help="Write intermediate structures for pipeline inspection.")
     return parser
 
 def validate_args(args: argparse.Namespace, parser: configargparse.ArgumentParser):
     """Validate parsed configuration before starting the workflow."""
-    if args.mode == "optimize" and args.embedding is None:
+    if args.mode == "optimize" and not args.embedding:
         parser.error("--embedding is required when --mode optimize is used.")
-
-    if args.max_miller_idx <= 0:
-        parser.error("--max-miller-idx must be positive.")
-
-    if args.film_layers <=0:
-        parser.error("--film-layers must be positive.")
-
-    if args.substrate_layers <=0:
-        parser.error("--substrate-layers must be positive.")
-
-    if args.gap <= 0.0:
-        parser.error("--gap must be positive.")
-
-    if args.vacuum <= 0.0:
-        parser.error("--vacuum must be positive.")
-
-    if args.zsl_max_area <= 0.0:
-        parser.error("--zsl-max-area must be positive.")
-
-    if args.zsl_area_ratio < 0.0:
-        parser.error("--zsl-area-ratio must be non-negative.")
-
-    if args.zsl_length < 0.0:
-        parser.error("--zsl-length must be non-negative.")
-
-    if args.zsl_angle < 0.0:
-        parser.error("--zsl-angle must be non-negative.")
-
-    if not 0.0 <= args.fgw_alpha <= 1.0:
-        parser.error("--fgw-alpha must be between 0.0 and 1.0.")
-
-    if args.fgw_n_starts <= 0:
-        parser.error("--fgw-n-starts must be positive.")
-
-    if args.bo_n_init <= 0:
-        parser.error("--bo-n-init must be positive.")
-
-    if args.bo_n_iter <= 0:
-        parser.error("--bo-n-iter must be positive.")
-
-    if args.bo_xi < 0.0:
-        parser.error("--bo-xi must be non-negative.")
-
-    if args.bo_penalty <= 0.0:
-        parser.error("--bo-penalty must be positive.")
-
-    if args.budget < 1:
-        parser.error("--budget must be at least 1.")
 
 def report_configuration(args: argparse.Namespace):
     """Report the run mode and enabled outputs."""
@@ -157,7 +109,7 @@ def select_interface_candidates(interfaces: List[Dict[str, Any]]):
     print("[Input] Enter 'all' or candidate numbers, e.g. 1,3,5")
 
     while True:
-        selection = input("[Input] Select candidates: ").strip()
+        selection = input("[Input] Select candidates: ").strip().lower()
         if selection == "all":
             return interfaces
         try:
@@ -195,7 +147,7 @@ def run(args: argparse.Namespace):
     )
     records = interface_builder.sum_interface_records(
         build_bulk_refs=True,
-        structure_check=(args.mode=="build")
+        structure_check = args.mode == "build",
     )
 
     if not records:
@@ -218,7 +170,7 @@ def run(args: argparse.Namespace):
             alpha=args.fgw_alpha,
             n_starts=args.fgw_n_starts,
             init_seed=args.fgw_seed,
-        )
+        ),
     )
     bo = RegistryPriorBO(
         encoder=encoder,
@@ -252,4 +204,4 @@ def main():
     run(args)
 
 if __name__ == "__main__":
-    main()  
+    main()

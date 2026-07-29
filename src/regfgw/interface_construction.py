@@ -25,10 +25,10 @@ class ZSLParams:
 
     Attributes
     ----------
-    max_area: Maximum allowed in-plane coincidence supercell area (Å²)
-    max_area_ratio_tol: Relative tolerance for film/substrate in-plane area ratio
-    max_length_tol: Relative tolerance for matching in-plane lattice vector lengths
-    max_angle_tol: Absolute tolerance for matching in-plane lattice vector angles
+    max_area: maximum allowed in-plane coincidence supercell area (Å²)
+    max_area_ratio_tol: relative tolerance for film/substrate in-plane area ratio
+    max_length_tol: relative tolerance for matching in-plane lattice vector lengths
+    max_angle_tol: absolute tolerance for matching in-plane lattice vector angles
     """
     max_area: float = 150.0
     max_area_ratio_tol: float = 0.06
@@ -55,9 +55,9 @@ class InterfaceParams:
 
     Attributes
     ----------
-    film_layers, substrate_layers: Slab thickness controls. One layer corresponds to the minimum stacking repeat period.
-    gap: Interfacial gap (Å)
-    vacuum: Vacuum thickness above film slab (Å)
+    film_layers, substrate_layers: slab thickness controls. One layer corresponds to the minimum stacking repeat period.
+    gap: interfacial gap (Å)
+    vacuum: vacuum thickness above film slab (Å)
     """
     film_layers: int = 3
     substrate_layers: int = 3
@@ -102,10 +102,10 @@ class InterfaceBuilder:
         """
         Parameters
         ----------
-        substrate, film: Bulk unit cells (pymatgen Structure) forming the two sides of the interface
-        max_miller_idx: Maximum Miller index for enumerating distinct facets
+        substrate, film: bulk unit cells (pymatgen Structure) forming the two sides of the interface
+        max_miller_idx: maximum Miller index for enumerating distinct facets
         zsl_params: ZSL lattice matching tolerances
-        interface_params: Slab thickness, gap and vacuum used for interface construction
+        interface_params: slab thickness, gap and vacuum used for interface construction
         """
         if max_miller_idx < 1:
             raise ValueError("max_miller_idx must be at least 1.")
@@ -222,7 +222,7 @@ class InterfaceBuilder:
         Parameters
         ----------
         cib: CoherentInterfaceBuilder associated with a fixed (substrate_miller, film_miller)
-        term: Termination pair from 'cib.terminations' (film_term, substrate_term)
+        term: termination pair from 'cib.terminations' (film_term, substrate_term)
         film_layers, substrate_layers: int or None. If None, use defaults from InterfaceParams.
 
         Returns
@@ -272,7 +272,7 @@ class InterfaceBuilder:
 
         Returns
         -------
-        list[tuple(Structure, float)]: Each item is (interface, area)
+        list[tuple(Structure, float)]: each item is (interface, area)
         """
         candidates = []
 
@@ -460,7 +460,7 @@ class InterfaceBuilder:
 
         Returns
         -------
-        list[dict]: Concatenated records from 'get_interface_records'
+        list[dict]: concatenated records from 'get_interface_records'
         """
         records = []
 

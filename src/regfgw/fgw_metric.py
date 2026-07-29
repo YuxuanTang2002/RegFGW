@@ -47,11 +47,11 @@ class FGWBuilder:
 
     @staticmethod
     def check_dense_labels(g: nx.Graph):
-        """Enforce nodes are labeled as 0, 1, ..., n-1, for mapping matrices back to graph nodes."""
+        """Require node labels to be consecutive integers from 0 to n-1."""
         n = int(g.number_of_nodes())
 
         if n == 0:
-            raise ValueError("Graph has 0 node.")
+            raise ValueError("Graph has no nodes.")
 
         if set(g.nodes()) != set(range(n)):
             raise RuntimeError(f"Graph nodes must have dense labels 0, ..., {n-1}.")
@@ -69,6 +69,8 @@ class FGWBuilder:
             if attr not in g.nodes[i]:
                 raise ValueError(f"Node {i} missing '{attr}' attribute")
             v = np.asarray(g.nodes[i][attr], dtype=float).ravel()
+            if not np.all(np.isfinite(v)):
+                raise ValueError(f"Node {i} attribute '{attr}' contains non-finite values.")
             if dim is None:
                 dim = v.shape[0]
                 if dim == 0:
@@ -94,13 +96,12 @@ class FGWBuilder:
         for i in range(n):
             for j in range(i+1, n):
                 if not g.has_edge(i, j):
-                    raise ValueError(f"Missing edge ({i},{j}). A complete graph required.")
-                d = g[i][j].get(attr, None)
+                    raise ValueError(f"Missing edge ({i}, {j}). A complete graph required.")
+                d = float(g[i][j].get(attr))
                 if d is None:
-                    raise ValueError(f"Edge ({i},{j}) missing '{attr}' attribute")
-                d = float(g.edges[i,j][attr])
+                    raise ValueError(f"Edge ({i}, {j}) missing '{attr}' attribute")
                 if not np.isfinite(d) or d < 0.0:
-                    raise ValueError(f"Invalid '{attr}' on edge ({i},{j}): {d}")
+                    raise ValueError(f"Invalid '{attr}' on edge ({i}, {j}): {d}")
                 c[i, j] = d
                 c[j, i] = d
 
@@ -125,7 +126,7 @@ class FGWBuilder:
         c2 = self.extract_structure_matrix(g_bulk)
         x1 = self.extract_feature_matrix(g_itf)
         x2 = self.extract_feature_matrix(g_bulk)
-        m = cdist(x1, x2, metric=self.params.feature_metric) # type: ignore[arg-type]
+        m = cdist(x1, x2, metric=self.params.feature_metric)  # type: ignore[arg-type]
         p = self.extract_mass_matrix(g_itf)
         q = self.extract_mass_matrix(g_bulk)
         return FGWInputs(M=m, C1=c1, C2=c2, p=p, q=q)
@@ -158,6 +159,28 @@ class FGWScoreParams:
     init_ipfp_tol: float = 1e-10
     init_ipfp_max_iter: int = 1000
 
+    def __post_init__(self):
+        if not 0.0 <= self.alpha <= 1.0:
+            raise ValueError("alpha must be between 0 and 1.")
+
+        if self.max_iter < 1:
+            raise ValueError("max_iter must be at least 1.")
+
+        if self.tol_rel < 0.0:
+            raise ValueError("tol_rel must be non-negative.")
+
+        if self.tol_abs < 0.0:
+            raise ValueError("tol_abs must be non-negative.")
+
+        if self.n_starts < 1:
+            raise ValueError("n_starts must be at least 1.")
+
+        if self.init_ipfp_tol < 0.0:
+            raise ValueError("init_ipfp_tol must be non-negative.")
+
+        if self.init_ipfp_max_iter < 1:
+            raise ValueError("init_ipfp_max_iter must be at least 1.")
+
 class FGWScorer:
     def __init__(self, builder: FGWBuilder, score_params=FGWScoreParams()):
         self.builder = builder
@@ -168,16 +191,16 @@ class FGWScorer:
         self.base_cache: Dict[Tuple[int, int, int], List[np.ndarray]] = {}
         # Cache normalization scales per bulk graph: key = id(g_bulk)
         self.norm_cache: Dict[int, Tuple[float, float]] = {}
-        # After normalization, enforce feature/structure scales are comparable to avoid FGW is dominated by one term.
+        # After normalization, enforce feature/structure scales remain comparable.
         self.scale_ratio_max = 10.0
 
     # -----------------------------------------------------------------------------
-    # Initialization  helpers
+    # Initialization helpers
     # -----------------------------------------------------------------------------
 
     def get_fixed_base_list(self, n1: int, n2: int, n_starts: int):
         """
-        Return a fixed list of random base matrices base_k (k=1, ..., n_start-1),
+        Return a fixed list of random base matrices base_k (k=1, ..., n_starts-1),
         k=0 is reserved for outer(p, q)
         """
         if n_starts < 2:
@@ -222,7 +245,7 @@ class FGWScorer:
         )
 
     # -----------------------------------------------------------------------------
-    # Normalization  helpers
+    # Normalization helpers
     # -----------------------------------------------------------------------------
 
     def normalize_inputs(self, g_bulk, M, C1, C2):
@@ -241,6 +264,11 @@ class FGWScorer:
         def average_upper_finite(c):
             iu = np.triu_indices(c.shape[0], k=1)
             vals = c[iu]
+
+            if vals.size == 0:
+                raise ValueError(
+                    "Structure matrices must contain at least two nodes."
+                )
 
             if not np.all(np.isfinite(vals)):
                 raise ValueError("Non-finite upper-triangle values found in structure matrix")
@@ -336,8 +364,8 @@ class FGWScorer:
 
     def score_with_fgw(self, sub_pair, film_pair):
         """
-        Interface score = FGW(substrate_main interface vs substrate bulk)
-        + FGW(film_main interface vs film bulk)
+        Interface score = FGW(substrate_side interface graph, substrate bulk graph)
+        + FGW(film_side interface graph, film bulk graph)
         """
         g_itf_sub_main, g_sub_bulk = sub_pair
         g_itf_film_main, g_film_bulk = film_pair

@@ -1,8 +1,8 @@
 from dataclasses import dataclass
-from typing import List
 from pymatgen.analysis.structure_matcher import StructureMatcher
 from pymatgen.core.interface import Interface
 from tqdm import tqdm
+from typing import List, Tuple
 
 # -----------------------------------------------------------------------------
 # Parameter containers
@@ -11,7 +11,7 @@ from tqdm import tqdm
 @dataclass(frozen=True)
 class InterfaceMatchParams:
     """
-    Parameters control periodic structure matching.
+    Parameters controlling periodic structure matching.
 
     Attributes
     ----------
@@ -22,6 +22,16 @@ class InterfaceMatchParams:
     ltol: float = 1e-5
     stol: float = 1e-3
     angle_tol: float = 1e-3
+
+    def __post_init__(self):
+        if self.ltol < 0.0:
+            raise ValueError("ltol must be non-negative.")
+
+        if self.stol < 0.0:
+            raise ValueError("stol must be non-negative.")
+
+        if self.angle_tol < 0.0:
+            raise ValueError("angle_tol must be non-negative.")
 
 @dataclass(frozen=True)
 class InterfaceGroup:
@@ -34,7 +44,7 @@ class InterfaceGroup:
     member_indices: indices of all equivalent structures
     """
     rep_index: int
-    member_indices: List[int]
+    member_indices: Tuple[int]
 
 # -----------------------------------------------------------------------------
 # Interface reduction
@@ -84,6 +94,6 @@ class InterfaceMatcher:
                 pbar.update(1)
 
         return [
-            InterfaceGroup(rep_index=group[0], member_indices=group)
+            InterfaceGroup(rep_index=group[0], member_indices=tuple(group))
             for group in groups
         ]

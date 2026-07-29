@@ -17,21 +17,17 @@ from typing import Dict, Any, List, DefaultDict, Tuple
 
 class GraphEncoder:
     """
-    Convert pymatgen Interface objects into graph pairs for FGW-style usage
+    Convert pymatgen Interface objects into graph pairs for FGW-style usage.
 
     Notes
     -----
-    * Node features: radial basis expansion(RBF) of neighbor distances +  element embedding aggregation
-    * Edge features: minimum image convention(MIC) distance between selected atoms (a fully-connected graph)
+    * Node features: radial basis expansion (RBF) of neighbor distances +  element embedding aggregation
+    * Edge features: minimum image convention (MIC) distance between selected atoms (a fully-connected graph)
     * PBC convention: (True, True, False) for slab-like systems
     """
-    def __init__(self, embedding_path: str | Path | None = None):
+    def __init__(self, embedding_path: str | Path):
         self.feature_lookup = None
         self.feature_dim = None
-
-        if embedding_path is None:
-            raise ValueError("embedding_path must be provided (.csv/.json).")
-
         self.feature_lookup, self.feature_dim = self.load_element_embedding(embedding_path)
         self.cutoff = None
 
@@ -60,13 +56,13 @@ class GraphEncoder:
                 if len(shells) > 3:
                     break
             if len(shells) < 3:
-                raise ValueError("Less than 3 shell layers. Increase slab size.")
+                raise ValueError("Less than 3 coordination shells were found. Increase slab size.")
             r3_i = max(shells[2])
             if r3_max is None or r3_i > r3_max:
                 r3_max = r3_i
 
         if r3_max is None:
-            raise ValueError("No valid centers with neighbours.")
+            raise ValueError("No valid centers with neighbors.")
 
         return r3_max
 
@@ -79,17 +75,20 @@ class GraphEncoder:
         """
         Load element embedding vectors from a CSV or JSON file.
 
-        CSV format: contain column 'element' and other columns are embedding dimensions.
+        CSV format: one column named 'element', followed by embedding dimensions.
         JSON format: {"H": [...], "C": [...], ...}
         """
         embedding_path = Path(embedding_path)
+
+        if not embedding_path.is_file():
+            raise FileNotFoundError(f"Embedding file does not exist in {embedding_path}")
 
         if embedding_path.suffix == ".csv":
             feature_df = pd.read_csv(embedding_path)
             if "element" not in feature_df.columns:
                 raise ValueError("Embedding CSV must contain a column named 'element'.")
             feature_lookup = {
-                row["element"]: np.array(row.iloc[1:], dtype=float)
+                row["element"]: row.drop("element").to_numpy(dtype=float)
                 for _, row in feature_df.iterrows()
             }
         elif embedding_path.suffix == ".json":
@@ -104,6 +103,12 @@ class GraphEncoder:
 
         dims = {v.shape for v in feature_lookup.values()}
 
+        if any(v.ndim !=1 for v in feature_lookup.values()):
+            raise ValueError("Element embedding must be a one-dimensional vector.")
+
+        if any(not np.all(np.isfinite(v)) for v in feature_lookup.values()):
+            raise ValueError("Embedding vectors must contain only finite values.")
+        
         if len(dims) != 1:
             raise ValueError(f"Inconsistent embedding dimensions: {dims}")
 
@@ -118,8 +123,8 @@ class GraphEncoder:
     @staticmethod
     def cluster_layers_by_z(atoms: Atoms):
         """
-        Cluster atoms into layers by identical (within tolerance) z coordinate.
-        Return a list of layers, each layer is a list of atom indices (in the original atoms indexing).
+        Cluster atoms into layers according to identical (within tolerance) z coordinate.
+        Return a list of layers, each layer is a list of atom indices (in the original Atoms indexing).
         """
         n = len(atoms)
 
@@ -128,7 +133,7 @@ class GraphEncoder:
 
         z = atoms.get_positions()[:, 2].astype(float)
         idx_sorted = np.argsort(z).astype(int)
-        z_sorted = z[idx_sorted] #z[idx_sorted] = [z[idx_sorted[0]], z[idx_sorted[1]], ..., z[idx_sorted[n-1]]]
+        z_sorted = z[idx_sorted]  
         layers: List[List[int]] = []
         current = [int(idx_sorted[0])]
         z_ref = float(z_sorted[0])
@@ -148,11 +153,16 @@ class GraphEncoder:
 
     @staticmethod
     def group_layers_into_periods(layers: List[List[int]], period_layers: int):
-        """Group consecutive layers into blocks(periods)."""
+        """Group consecutive layers into blocks (periods)."""
         if period_layers <= 0:
-            raise ValueError("period_layers must be > 0")
+            raise ValueError("period_layers must be at least 1.")
 
         nl = len(layers)
+
+        if nl % period_layers != 0:
+            raise ValueError(f"{nl} layers cannot be evenly divided into "
+                             f"periods of {period_layers} layers.")
+
         periods: List[List[int]] = []
         npd = nl // period_layers
 
@@ -208,7 +218,7 @@ class GraphEncoder:
         """
         Compute node features for selected atoms.
 
-        Feature for each selected atom i: sum_{j in neigh(i)}  f_c(d_ij) * exp(-gamma*(d_ij-c_r)^2) * emb(elem_j)
+        Feature for each selected atom i: sum_{j in neigh(i)} f_c(d_ij) * exp(-gamma*(d_ij-c_r)^2) * emb(elem_j)
         * c_r: evenly spaced centers in [0, cutoff]
         * f_c: cosine cutoff (0 outside cutoff)
 
@@ -216,6 +226,12 @@ class GraphEncoder:
         -------
         rbf_el: (n_sel, n_rbf * emb_dim)
         """
+        if cutoff <= 0.0:
+            raise ValueError("cutoff must be positive.")
+
+        if n_rbf < 1:
+            raise ValueError("n_rbf must be at least 1.")
+        
         centers = np.linspace(0.0, cutoff, n_rbf, dtype=float)
         width = cutoff / max(n_rbf - 1, 1)
         gamma = 1.0 / (width * width + 1e-12)
@@ -298,9 +314,6 @@ class GraphEncoder:
         for node_i in range(n_sel):
             g.add_node(int(node_i), feature=[float(x) for x in rbf_el[node_i]])
 
-        atoms = atoms.copy()
-        atoms.pbc = (True, True, False)
-        atoms.wrap()
         d = atoms.get_all_distances(mic=True)
 
         for i in range(n_sel):
@@ -309,7 +322,7 @@ class GraphEncoder:
                 gj = sel[j]
                 dij = float(d[gi, gj])
                 if not np.isfinite(dij) or dij < 0.0:
-                    raise ValueError(f"Invalid MIC distance for pair ({gi},{gj}): {dij}")
+                    raise ValueError(f"Invalid MIC distance for pair ({gi}, {gj}): {dij}")
                 g.add_edge(int(i), int(j), distance=dij)
 
         return g
@@ -359,7 +372,7 @@ class GraphEncoder:
         film_bulk_struct = interface["film_bulk"]
 
         if sub_bulk_struct is None or film_bulk_struct is None:
-            raise ValueError("substrate bulk / film bulk is None. Build bulk references first.")
+            raise ValueError("substrate and film bulk references are None. Build bulk references first.")
 
         # Convert bulks to ASE Atoms
         sub_bulk_atoms: Atoms = AseAtomsAdaptor.get_atoms(sub_bulk_struct)
@@ -403,7 +416,7 @@ class GraphEncoder:
             sub_atoms, film_atoms,
             sub_period_layers=sub_period_layers, film_period_layers=film_period_layers,
         )
-        # Map local indices in sub_atoms/film_atoms to global indices in itf_atoms,
+        # Map local substrate and film indices to global interface indices.
         sub_pick_global = [int(sub_idx[k]) for k in sub_pick_local]
         film_pick_global = [int(film_idx[k]) for k in film_pick_local]
 

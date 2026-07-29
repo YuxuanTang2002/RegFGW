@@ -62,6 +62,22 @@ class BOParams:
     xi: float = 1e-4
     penalty: float = 1e6
 
+    def __post_init__(self):
+        if self.n_init < 1 or self.n_init & (self.n_init-1):
+            raise ValueError("n_init must be a positive power of 2 for Sobol initialization.")
+
+        if self.n_iter < 1:
+            raise ValueError("n_iter must be at least 1.")
+
+        if self.acq_candidates < 1:
+            raise ValueError("acq_candidates must be at least 1.")
+
+        if self.xi <= 0.0:
+            raise ValueError("xi must be non-negative.")
+
+        if self.penalty <= 0.0:
+            raise ValueError("penalty must be non-negative.")
+
 # -----------------------------------------------------------------------------
 # Registry optimization engine
 # -----------------------------------------------------------------------------
@@ -83,7 +99,7 @@ class RegistryPriorBO:
             scorer: FGWScorer,
             bo_params: BOParams,
             structure_check=False,
-            ):
+    ):
         self.g_sub_bulk = None
         self.g_film_bulk = None
         self.enc = encoder
@@ -168,13 +184,13 @@ class RegistryPriorBO:
         Returns
         -------
         dict{
-        "sub_indices": list[int],
-        "film_indices": list[int],
-        "sub_nums": np.ndarray",
+        "sub_indices": List[int],
+        "film_indices": List[int],
+        "sub_nums": np.ndarray,
         "film_nums": np.ndarray,
-        "cov_sum": np.ndarray, # shape = (n_sub, n_film)
-        "vdw_sum": np.ndarray, # shape = (n_sub, n_film)
-        "d": np.ndarray, # shape = (n_sub, n_film)
+        "cov_sum": np.ndarray, shape = (n_sub, n_film)
+        "vdw_sum": np.ndarray, shape = (n_sub, n_film)
+        "d": np.ndarray, shape = (n_sub, n_film)
         }
         """
         c_all = np.array([s.coords[2] for s in itf.sites], dtype=float)
@@ -278,8 +294,8 @@ class RegistryPriorBO:
 
         Strategy
         --------
-        1） Use a small set of representative reference registries.
-        2） For each registry, scan shift_c values along the surface normal and return the first shift
+        1) Use a small set of representative reference registries.
+        2) For each registry, scan shift_c values along the surface normal and return the first shift
         at which the reference interface enters a physically meaningful near-contact regime.
         3) Take the median shift_c over the reference registries.
         """
@@ -406,7 +422,7 @@ class RegistryPriorBO:
 
         Algorithm
         ---------
-        1) Random initialization (n_init samples)
+        1) Scrambled Sobol initialization (n_init samples)
         2) Fit Gaussian Process surrogate model.
         3) Maximum EI acquisition.
         4) Evaluate selected registry.
@@ -418,12 +434,6 @@ class RegistryPriorBO:
         """
         if budget < 1:
             raise ValueError("budget must be at least 1.")
-
-        if self.params.n_init < 1:
-            raise ValueError("n_init must be at least 1.")
-
-        if self.params.n_iter < 1:
-            raise ValueError("n_iter must be at least 1.")
         
         self.g_sub_bulk = None
         self.g_film_bulk = None
@@ -454,12 +464,6 @@ class RegistryPriorBO:
 
         total_steps = self.params.n_init + self.params.n_iter
         m = int(np.log2(self.params.n_init))
-
-        if 2 ** m != self.params.n_init:
-            raise ValueError(
-                "n_init must be a power of two when using Sobol initialization."
-            )
-
         sobol = qmc.Sobol(
             d=2,
             scramble=True,
@@ -468,7 +472,7 @@ class RegistryPriorBO:
         initial_points = sobol.random_base2(m)
 
         with tqdm(total=total_steps, desc="BO initialization", leave=False) as pbar:
-            # Random initialization
+            # Sobol initialization
             for shift_a, shift_b in initial_points:
                 shift_a = float(shift_a)
                 shift_b = float(shift_b)
@@ -551,7 +555,7 @@ class RegistryPriorBO:
             )
             groups = matcher.group_interfaces([record.registry for record in out_records])
             out_records = [out_records[group.rep_index] for group in groups]
-            print(f"[Unique] Reduce {len(records)} registries to {len(out_records)} unique registries.")
+            print(f"[Unique] Reduced {len(records)} registries to {len(out_records)} unique registries.")
 
         out_records.sort(key=lambda record: record.score)
 
