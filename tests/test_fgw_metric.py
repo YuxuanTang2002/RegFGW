@@ -29,11 +29,12 @@ def test_build_input_matrices():
             [0.0, 1.0],
             [1.0, 0.0],
         ],
-        distance={
-            {0, 1}: 3.0,
+        distances={
+            (0, 1): 3.0,
         },
     )
-    inputs = FGWBuilder.build_input_matrices(graph1, graph2)
+    builder = FGWBuilder()
+    inputs = builder.build_input_matrices(graph1, graph2)
     np.testing.assert_allclose(
         inputs.M,
         [

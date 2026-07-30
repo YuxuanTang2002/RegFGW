@@ -11,6 +11,9 @@ __pycache__/
 *.pyo
 *.pyd
 
+# pytest
+.pytest_cache/
+
 # build artifacts
 build/
 dist/

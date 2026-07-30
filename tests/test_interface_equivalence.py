@@ -24,4 +24,4 @@ def test_group_interfaces(monkeypatch):
         ["A", "B", "A", "C", "B"]
     )
     member_in_groups = [group.member_indices for group in groups]
-    assert member_in_groups == [[0, 2], [1, 4], [3]]
+    assert member_in_groups == [(0, 2), (1, 4), (3,)]
