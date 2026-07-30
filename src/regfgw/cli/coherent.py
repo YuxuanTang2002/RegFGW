@@ -122,6 +122,36 @@ def select_interface_candidates(interfaces: List[Dict[str, Any]]):
             continue
         return [interfaces[index-1] for index in indices]
 
+def prompt_continuity_check():
+    """Prompt whether to keep interface registry continuity filtering."""
+    while True:
+        selection = input(
+            "[Input] This interface may not be compatible with the default continuity criteria. "
+            "Keep the continuity check enabled? [y/n/q]: "
+        ).strip().lower()
+        if selection in {"y", "yes"}:
+            return True
+        if selection in {"n", "no"}:
+            return False
+        if selection in {"q", "quit"}:
+            raise SystemExit("Interface registry optimization cancelled.")
+        print("[Error] Enter 'y' to keep the continuity check enabled, 'n' to disable it, or 'q' to quit.")
+
+def prompt_shift_c():
+    """Prompt for a manual normal shift or exit the workflow."""
+    while True:
+        selection = input(
+            "[Input] Enter a manual shift_c in Å "
+            "(positive increases the interfacial gap, negative decreases it) "
+            "or 'q' to quit: "
+        ).strip().lower()
+        if selection in {"q", "quit"}:
+            raise SystemExit("Interface registry optimization cancelled.")
+        try:
+            return float(selection)
+        except ValueError:
+            print("[Error] Enter a numeric shift_c, such as -1.25, or 'q' to quit.")
+
 def run(args: argparse.Namespace):
     report_configuration(args)
     substrate = Structure.from_file(args.substrate)
@@ -156,6 +186,10 @@ def run(args: argparse.Namespace):
         )
 
     print(f"[Info] Built {len(records)} coherent interface candidates.")
+    print(
+        "[Note] Miller-index pairs are symmetry-unique. Negative indices "
+        "indicate substrate or film flips used to enumerate all terminations."
+    )
 
     if args.mode == "build":
         return
@@ -186,15 +220,28 @@ def run(args: argparse.Namespace):
         structure_check=args.pipeline_check,
     )
 
-    for interface in tqdm(selected_candidates, desc="Optimizing interfaces"):
-        bo.bayes_optimize_registry(
-            interface,
-            budget=args.budget,
-            unique=args.unique,
-            out_traj=args.out_traj,
-            dft_gap_offset=args.dft_gap_offset,
-        )
-
+    for index, interface in enumerate(selected_candidates, start=1):
+        print(f"[Info] Optimizing interface {index}/{len(selected_candidates)}.")
+        shift_c = None
+        continuity_check = True
+        while True:
+            try:
+                bo.bayes_optimize_registry(
+                    interface,
+                    budget=args.budget,
+                    unique=args.unique,
+                    out_traj=args.out_traj,
+                    dft_gap_offset=args.dft_gap_offset,
+                    shift_c=shift_c,
+                    continuity_check=continuity_check,
+                )
+                break
+            except RuntimeError as e:
+                print(f"[Error] {str(e)}")
+                continuity_check = prompt_continuity_check()
+                shift_c = prompt_shift_c()
+                print(f"[Info] Retry shift_c={shift_c:.6f} Å with continuity_check={continuity_check}.")
+        
     print("[Done] Interface optimization completed.")
 
 def main():

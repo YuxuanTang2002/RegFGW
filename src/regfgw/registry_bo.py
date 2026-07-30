@@ -73,10 +73,10 @@ class BOParams:
             raise ValueError("acq_candidates must be at least 1.")
 
         if self.xi <= 0.0:
-            raise ValueError("xi must be non-negative.")
+            raise ValueError("xi must be positive.")
 
         if self.penalty <= 0.0:
-            raise ValueError("penalty must be non-negative.")
+            raise ValueError("penalty must be positive.")
 
 # -----------------------------------------------------------------------------
 # Registry optimization engine
@@ -184,10 +184,10 @@ class RegistryPriorBO:
         Returns
         -------
         dict{
-        "sub_indices": List[int],
-        "film_indices": List[int],
-        "sub_nums": np.ndarray,
-        "film_nums": np.ndarray,
+        "sub_indices": List[int]
+        "film_indices": List[int]
+        "sub_nums": np.ndarray
+        "film_nums": np.ndarray
         "cov_sum": np.ndarray, shape = (n_sub, n_film)
         "vdw_sum": np.ndarray, shape = (n_sub, n_film)
         "d": np.ndarray, shape = (n_sub, n_film)
@@ -255,7 +255,8 @@ class RegistryPriorBO:
 
         Returns
         -------
-        True if registry satisfies physical continuity constraints.
+        is_valid: bool, whether the registry passes the continuity check.
+        reason: str, "valid", "too_close" or "too_far"
         """
         pairs = self.count_interface_pairs(itf)
         sub_indices = pairs["sub_indices"]
@@ -271,7 +272,7 @@ class RegistryPriorBO:
         max_overlap_atoms = max(1, int(0.05 * min(len(sub_indices), len(film_indices))))
 
         if max(n_sub_overlap, n_film_overlap) > max_overlap_atoms:
-            return False
+            return False, "too_close"
 
         # Contact check (too far)
         contact = (d <= (vdw_sum + 0.2))
@@ -280,9 +281,9 @@ class RegistryPriorBO:
         min_contact_atoms = max(3, int(0.05 * min(len(sub_indices), len(film_indices))))
 
         if min(n_sub_contact, n_film_contact) < min_contact_atoms:
-            return False
+            return False, "too_far"
 
-        return True
+        return True, "valid"
 
     # -----------------------------------------------------------------------------
     # Normal registry feasibility scanning
@@ -334,7 +335,7 @@ class RegistryPriorBO:
                 else:
                     raise RuntimeError(
                         f"No near-contact shift_c found for reference registry (shift_a={shift_a}, shift_b={shift_b}). "
-                        "Interface may be too separated or chemically incompatible under current settings."
+                        "Check the interface geometry and gap settings."
                     )
                 ref_shift_cs.append(found_shift_c)
 
@@ -354,6 +355,7 @@ class RegistryPriorBO:
             shift_b: float = 0.0,
             shift_c: float = 0.0,
             structure_check: bool = False,
+            continuity_check: bool = True,
     ):
         """
         Evaluate registry score after applying shift.
@@ -369,6 +371,7 @@ class RegistryPriorBO:
         -------
         score: float, returns inf if physical constraints fail
         shifted_itf: Interface, shifted interface structure
+        continuity_status: str, "valid", "too_close" or "too_far"
         """
         if self.g_sub_bulk is None or self.g_film_bulk is None:
             self.g_sub_bulk, self.g_film_bulk = self.enc.prepare_bulk_cache(
@@ -380,9 +383,12 @@ class RegistryPriorBO:
 
         base_itf = interface["interface"]
         shifted_itf = self.shift_film(base_itf, shift_a, shift_b, shift_c)
+        continuity_status = "not_checked"
 
-        if not self.check_registry_continuity(shifted_itf):
-            return float("inf"), shifted_itf
+        if continuity_check:
+            is_valid, continuity_status = self.check_registry_continuity(shifted_itf)
+            if not is_valid:
+                return float("inf"), shifted_itf, continuity_status
 
         new_interface = dict(interface)
         new_interface["interface"] = shifted_itf
@@ -397,7 +403,7 @@ class RegistryPriorBO:
             (g_itf_film, self.g_film_bulk),
         )
 
-        return float(score), shifted_itf
+        return float(score), shifted_itf, continuity_status
 
     # -----------------------------------------------------------------------------
     # Main optimizer
@@ -411,6 +417,7 @@ class RegistryPriorBO:
             out_traj: bool = False,
             dft_gap_offset: float = 0.0,
             shift_c: Optional[float] = None,
+            continuity_check: bool = True,
     ):
         """
         Perform Bayesian optimization over in-plane registry space.
@@ -451,16 +458,12 @@ class RegistryPriorBO:
             return (best-mu-xi) * cdf + sigma * pdf
 
         if shift_c is None:
-            try:
-                shift_c = self.suggest_shift_c(interface)
-            except Exception as e:
-                shift_c = 0.0
-                print(f"[Warn] suggest_shift_c failed. {type(e).__name__}: {e}. Keep as-built gap and continue.")
+            shift_c = self.suggest_shift_c(interface)
 
         if self.structure_check:
             self.g_sub_bulk = None
             self.g_film_bulk = None
-            self.score_registry(interface, shift_c=shift_c, structure_check=True)
+            self.score_registry(interface, shift_c=shift_c, structure_check=True, continuity_check=continuity_check)
 
         total_steps = self.params.n_init + self.params.n_iter
         m = int(np.log2(self.params.n_init))
@@ -470,13 +473,22 @@ class RegistryPriorBO:
             seed=self.params.seed,
         )
         initial_points = sobol.random_base2(m)
+        initial_failure_counts = {"too_close": 0, "too_far": 0}
 
         with tqdm(total=total_steps, desc="BO initialization", leave=False) as pbar:
             # Sobol initialization
             for shift_a, shift_b in initial_points:
                 shift_a = float(shift_a)
                 shift_b = float(shift_b)
-                score, reg = self.score_registry(interface, shift_a=shift_a, shift_b=shift_b, shift_c=shift_c)
+                score, reg, continuity_status = self.score_registry(
+                    interface, 
+                    shift_a=shift_a, 
+                    shift_b=shift_b, 
+                    shift_c=shift_c,
+                    continuity_check=continuity_check,
+                )
+                if continuity_status in initial_failure_counts:
+                    initial_failure_counts[continuity_status] += 1
                 step = len(records)
                 record = BORecord(step=step, score=score, registry=reg)
                 records.append(record)
@@ -489,8 +501,12 @@ class RegistryPriorBO:
                 pbar.update(1)
             if best_record is None:
                 raise RuntimeError(
-                    "All initial samples failed (score=inf). "
-                    "No registry passed check_registry_continuity, BO cannot proceed."
+                    "All Sobol initialization samples failed the interface continuity check.\n"
+                    f"too_close={initial_failure_counts['too_close']}, "
+                    f"too_far={initial_failure_counts['too_far']}, "
+                    f"shift_c={shift_c:.6f} Å.\n"
+                    "Bayesian optimization cannot proceed. "
+                    "Provide a manual shift_c value or inspect the interface structure. "
                 )
             pbar.set_description("BO refinement")
             # Gaussian Process surrogate
@@ -502,14 +518,22 @@ class RegistryPriorBO:
             gp = GaussianProcessRegressor(kernel=kernel, normalize_y=True, random_state=self.params.seed, alpha=1e-6)
             # BO refinement loop
             refine_finite = False
+            refinement_failure_counts = {"too_close": 0, "too_far": 0}
+
             for _ in range(self.params.n_iter):
                 x_array = np.asarray(x, dtype=float)
                 y_array = np.asarray(y, dtype=float)
                 mask = np.isfinite(y_array) & (y_array < self.params.penalty * 0.5)
-                if np.count_nonzero(mask) < 3:
+                n_valid = int(np.count_nonzero(mask))
+                if n_valid < 3:
                     raise RuntimeError(
-                        "Too few valid registries to fit GP model. "
-                        "Registry space likely dominated by invalid configurations."
+                        "Too few valid registries to fit GP model.\n"
+                        f"valid={n_valid}, "
+                        f"too_close={initial_failure_counts['too_close']}, "
+                        f"too_far={initial_failure_counts['too_far']}, "
+                        f"shift_c={shift_c:.6f} Å.\n"
+                        "Registry space likely dominated by invalid configurations. "
+                        "Provide a manual shift_c value or inspect the interface structure. "
                     )
                 else:
                     x_train = self.periodic_embedding(x_array[mask])
@@ -524,7 +548,15 @@ class RegistryPriorBO:
                 best_idx = int(np.argmax(ei))
                 shift_a = float(x_cand[best_idx, 0])
                 shift_b = float(x_cand[best_idx, 1])
-                score, reg = self.score_registry(interface, shift_a=shift_a, shift_b=shift_b, shift_c=shift_c)
+                score, reg, continuity_status = self.score_registry(
+                    interface, 
+                    shift_a=shift_a, 
+                    shift_b=shift_b, 
+                    shift_c=shift_c,
+                    continuity_check=continuity_check,
+                )
+                if continuity_status in refinement_failure_counts:
+                    refinement_failure_counts[continuity_status] += 1
                 step = len(records)
                 record = BORecord(step=step, score=score, registry=reg)
                 records.append(record)
@@ -539,8 +571,12 @@ class RegistryPriorBO:
                 pbar.update(1)
             if not refine_finite:
                 raise RuntimeError(
-                    "All refinement samples failed (score=inf). "
-                    "No registry passed check_registry_continuity, BO cannot proceed."
+                    "All refinement samples failed the interface continuity check.\n"
+                    f"too_close={refinement_failure_counts['too_close']}, "
+                    f"too_far={refinement_failure_counts['too_far']}, "
+                    f"shift_c={shift_c:.6f} Å.\n"
+                    "Bayesian optimization cannot proceed. "
+                    "Provide a manual shift_c value or inspect the interface structure. "
                 )
 
         out_records = [record for record in records if np.isfinite(record.score)]
