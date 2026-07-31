@@ -49,7 +49,6 @@ def main():
     shift_c = float(bo.suggest_shift_c(record))
     bo_curves = []
     random_curves = []
-    trial_rows = []
     n_init = 8
     n_iter = 50
 
@@ -87,7 +86,7 @@ def main():
         for _ in tqdm(range(n_iter), desc="Random refinement", leave=False):
             shift_a = float(rng.uniform(0.0, 1.0))
             shift_b = float(rng.uniform(0.0, 1.0))
-            score, _ = random_search.score_registry(
+            score, _, _ = random_search.score_registry(
                 record,
                 shift_a=shift_a,
                 shift_b=shift_b,
@@ -96,25 +95,6 @@ def main():
             random_scores.append(score)
         random_scores = np.asarray(random_scores, dtype=float)
         random_curves.append(np.minimum.accumulate(random_scores))
-        trial_rows.append(
-            {
-                "trial": trial_index,
-                "seed": seed,
-                "bo_final": float(bo_curves[-1][-1]),
-                "random_final": float(random_curves[-1][-1]),
-                "bo_minus_random": float(
-                    bo_curves[-1][-1] - random_curves[-1][-1]
-                ),
-                "bo_at_iter10": float(bo_curves[-1][n_init - 1 + 10]),
-                "random_at_iter10": float(
-                    random_curves[-1][n_init - 1 + 10]
-                ),
-                "bo_minus_random_at_iter10": float(
-                    bo_curves[-1][n_init - 1 + 10]
-                    - random_curves[-1][n_init - 1 + 10]
-                ),
-            }
-        )
 
     bo_curves = np.asarray(bo_curves, dtype=float)
     random_curves = np.asarray(random_curves, dtype=float)
@@ -141,19 +121,6 @@ def main():
     random_output = out_dir / "random_convergence.csv"
     bo_summary.to_csv(bo_output, index=False)
     random_summary.to_csv(random_output, index=False)
-    trial_summary = pd.DataFrame(trial_rows)
-    trial_summary.to_csv(
-        out_dir / "trial_final_scores.csv",
-        index=False,
-    )
-
-    print(trial_summary.to_string(index=False))
-    print(
-        "BO wins:",
-        int((trial_summary["bo_minus_random"] < 0).sum()),
-        "/",
-        len(trial_summary),
-    )
     print(f"[Done] Write BO and random convergence curves in {out_dir}.")
 
 if __name__ == "__main__":

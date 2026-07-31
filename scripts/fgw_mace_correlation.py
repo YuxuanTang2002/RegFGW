@@ -12,7 +12,7 @@ from ase.optimize import FIRE, BFGS
 from ase.constraints import FixAtoms
 from pymatgen.io.ase import AseAtomsAdaptor
 from regfgw.fgw_metric import FGWBuilder, FGWBuildParams, FGWScorer, FGWScoreParams
-from regfgw.registry_bo import  BOParams, RegistryPriorBO
+from regfgw.registry_bo import BOParams, RegistryPriorBO
 from regfgw.structure_to_graph import GraphEncoder
 from mace.calculators import mace_mp
 
@@ -22,11 +22,11 @@ class GridSampleConfig:
     grid_b: int = 19
 
 def set_atomic_constraints(
-        atoms: Atoms,
-        substrate_indices,
-        film_indices,
-        free_sub_top_frac: float | None = None,
-        free_film_bottom_frac: float | None = None,
+    atoms: Atoms,
+    substrate_indices,
+    film_indices,
+    free_sub_top_frac: float | None = None,
+    free_film_bottom_frac: float | None = None,
 ):
     z = np.asarray(atoms.positions[:, 2], dtype=float)
     sub_idx = list(substrate_indices)
@@ -66,7 +66,7 @@ def main():
     p.add_argument("--mace-model", type=str, default="medium")
     p.add_argument("--mace-device", type=str, default="cuda")
     p.add_argument("--mace-dtype", type=str, default="float32")
-    p.add_argument("--mace-gap-offset", type=float, default=0.0, help="Additional gap offset applied on initial structures.")
+    p.add_argument("--mace-gap-offset", type=float, default=0.0, help="Additional gap offset applied for MACE relaxation.")
     p.add_argument("--optimizer", default="fire", choices=["fire", "bfgs"])
     p.add_argument("--fmax", type=float, default=0.03)
     p.add_argument("--max-steps", type=int, default=300)
@@ -74,6 +74,10 @@ def main():
     p.add_argument("--free-film-bottom-frac", type=float, default=1.0, help="Bottom fraction of film slab allowed to relax")
     p.add_argument("--output", choices=["fgw", "energy"], default="energy", help="Quantity to output")
     args = p.parse_args()
+
+    if args.mace_gap_offset != 0.0 and (args.output != "energy" or args.mace_mode != "opt"):
+        p.error("--mace-gap-offset requires MACE relaxation mode.")
+
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -114,6 +118,8 @@ def main():
     calc = None
 
     if args.output == "energy":
+        if args.mace_mode == "opt" and args.mace_gap_offset != 0.0:
+            print(f"[Info] Applied an additional gap offset {args.mace_gap_offset:.3f} Å for MACE relaxation.")
         calc = mace_mp(model=args.mace_model, device=args.mace_device, default_dtype=args.mace_dtype)
         if args.mace_mode == "opt":
             summary_path = out_dir / "mace_relaxed_energy.csv"
@@ -139,7 +145,7 @@ def main():
             for a in grid_a:
                 for b in grid_b:
                     if args.output == "fgw":
-                        score, reg = bo.score_registry(
+                        score, _, _ = bo.score_registry(
                             record,
                             shift_a=float(a),
                             shift_b=float(b),
@@ -150,12 +156,14 @@ def main():
                             score = f"{float(score):.12f}"
                         else:
                             score = ""
-                        writer.writerow([
-                            f"{float(a):.3f}",
-                            f"{float(b):.3f}",
-                            f"{float(shift_c):.3f}",
-                            score,
-                        ])
+                        writer.writerow(
+                            [
+                                f"{float(a):.3f}",
+                                f"{float(b):.3f}",
+                                f"{float(shift_c):.3f}",
+                                score,
+                            ]
+                        )
                     else:
                         reg_mace = RegistryPriorBO.shift_film(
                             record["interface"],
@@ -196,12 +204,14 @@ def main():
                             energy = f"{float(energy):.12f}"
                         else:
                             energy = ""
-                        writer.writerow([
-                            f"{float(a):.3f}",
-                            f"{float(b):.3f}",
-                            f"{float(shift_c + args.mace_gap_offset):.3f}",
-                            energy,
-                        ])
+                        writer.writerow(
+                            [
+                                f"{float(a):.3f}",
+                                f"{float(b):.3f}",
+                                f"{float(shift_c + args.mace_gap_offset):.3f}",
+                                energy,
+                            ]
+                        )
                     pbar.update(1)
 
     if args.output == "fgw":

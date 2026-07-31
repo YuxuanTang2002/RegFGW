@@ -44,7 +44,7 @@ def build_parser():
     parser.add_argument("--film-layers", type=int, default=3, help="Number of film layers in each interface candidate")
     parser.add_argument("--substrate-layers", type=int, default=3, help="Number of substrate layers in each interface candidate")
     parser.add_argument("--gap", type=float, default=5.0, help="Initial interfacial gap in Å")
-    parser.add_argument("--dft-gap-offset", type=float, default=0.0, help="Additional normal gap offset in Å applied before structure output")
+    parser.add_argument("--dft-gap-offset", type=float, default=0.0, help="Additional normal gap offset in Å applied for DFT relaxation")
     parser.add_argument("--vacuum", type=float, default=20.0, help="Vacuum thickness in Å")
     # ZSL tolerances
     parser.add_argument("--zsl-max-area", type=float, default=150.0, help="Maximum matched interface area in Å²")
@@ -90,7 +90,7 @@ def report_configuration(args: argparse.Namespace):
         print("[Info] BO trajectory output is enabled.")
 
     if args.dft_gap_offset != 0.0:
-        print(f"[Info] DFT gap offset: {args.dft_gap_offset} Å")
+        print(f"[Info] Applied an additional gap offset {args.dft_gap_offset:.3f} Å to DFT relaxation structures.")
 
 def print_interface_candidates(interfaces: List[Dict[str, Any]]):
     """Print coherent interface candidates for BO optimization."""

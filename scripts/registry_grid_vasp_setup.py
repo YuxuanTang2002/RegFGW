@@ -62,7 +62,7 @@ class RelaxConfig:
     isym: int = 0
     # Formal relaxation setting after pre-relaxation without dipole correction
     istart: int = 1
-    icharg: int = 0 # istart=1, icharg=0 for formal relaxtion after pre-relaxtion. istart=1, icharg=1 for restart.
+    icharg: int = 0 # istart=1, icharg=0 for formal relaxation after pre-relaxation. istart=1, icharg=1 for restart.
     ldipol: bool = True
     idipol: int = 3
     dipol: Optional[List[float]] = None
@@ -164,7 +164,7 @@ def scan_registry_grid(
 
     with tqdm(total=len(registries), desc="Scanning registry grid") as pbar:
         for grid_index, a, b, _ in registries:
-            score, reg_sp = bo.score_registry(
+            score, reg_sp, _ = bo.score_registry(
                 base_itf,
                 shift_a=float(a),
                 shift_b=float(b),
@@ -350,7 +350,7 @@ echo "Finish: $(date)"
 def main():
     p = argparse.ArgumentParser(
         description=(
-            "Generate VASP inputs for all interface registries on a centered unifrom grid."
+            "Generate VASP inputs for interface registries on a centered unifrom grid."
         )
     )
     p.add_argument("--record-json", required=True, help="Interface record JSON")
@@ -358,19 +358,19 @@ def main():
     p.add_argument("--potcar-root", required=True, help="Root directory of POTCAR library")
     p.add_argument("--out-dir", required=True, help="Output directory")
     p.add_argument("--unique", action="store_true", help="Output one representative from each equivalent registry group.")
-    p.add_argument("--dft-gap-offset", type=float, default=0.0, help="Additional normal gap offset applied on initial structures")
+    p.add_argument("--dft-gap-offset", type=float, default=0.0, help="Additional normal gap offset applied for MACE and DFT relaxation")
     p.add_argument("--mode", choices=["opt", "scf"], default="opt")
     p.add_argument("--scheduler", choices=["sge", "slurm"], default="sge", help="Output job submission script for SGE or SLURM.")
-    p.add_argument("--kspacing", type=float, default=0.25, help="Reciprocal-spcae k-point spacing")
+    p.add_argument("--kspacing", type=float, default=0.25, help="Reciprocal-space k-point spacing")
     p.add_argument("--free-sub-top-frac", type=float, default=0.5, help="Top fraction of substrate slab allowed to relax")
     p.add_argument("--free-film-bottom-frac", type=float, default=0.5, help="Bottom fraction of film slab allowed to relax")
     args = p.parse_args()
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    print(f"[Mode] Registry-grid {args.mode} VASP setup")
+    print(f"[Mode] Registry-grid VASP {args.mode} setup")
 
     if args.dft_gap_offset != 0.0:
-        print(f"[Note] DFT gap offset enabled: {args.dft_gap_offset:.3f}Å will be applied.")
+        print(f"[Info] Applied an additional gap offset {args.dft_gap_offset:.3f} Å to MACE and DFT relaxation structures.")
 
     with open(args.record_json, "r", encoding="utf-8") as f:
         record = json.load(f, cls=MontyDecoder)
@@ -441,11 +441,11 @@ def main():
     if args.mode == "opt":
         incar_cfg = RelaxConfig()
         job_name = "OPT"
-        print("[Note] Relaxation INCAR will be generated.")
+        print("[Info] Relaxation INCAR will be generated.")
     else:
         incar_cfg = StaticConfig()
         job_name = "SCF"
-        print("[Note] Static calculation INCAR will be generated.")
+        print("[Info] Static calculation INCAR will be generated.")
 
     if getattr(incar_cfg, "ldipol", False):
         if not hasattr(incar_cfg, "idipol"):
@@ -454,7 +454,7 @@ def main():
         ref_reg = RegistryPriorBO.shift_film(ref_reg, shift_c=args.dft_gap_offset)
         dipol = build_dipol(ref_reg, idipol=incar_cfg.idipol)
         incar_cfg = replace(incar_cfg, dipol=dipol)
-        print(f"[Note] DIPOL set from reference interface: {dipol}")
+        print(f"[Info] DIPOL set from reference interface: {dipol}")
 
 
     if args.scheduler == "sge":
@@ -481,7 +481,7 @@ def main():
         prepare_potcar(case_dir=case_dir, potcar_root=potcar_root, sym_potcar_map=sym_potcar_map)
 
     prepare_job_array(out_dir=out_dir, job_cfg=job_cfg,sample_cfg=sample_cfg, scheduler=args.scheduler)
-    print(f"[Done] Prepared {len(pool)} cases in: {out_dir}")
+    print(f"[Done] Prepared {len(pool)} cases in {out_dir}")
 
 if __name__ == "__main__":
     main()
