@@ -31,7 +31,7 @@ pip install ./RegFGW
 
 ## Usage
 
-RegFGW provides the `regfgw_coherent` command-line interface for coherent interface construction and registry optimization. Use `--help` to view all available option.
+RegFGW provides the `regfgw_coherent` command-line interface for coherent interface construction and registry optimization. Use `--help` to view all available options.
 
 ### Interface construction
 
