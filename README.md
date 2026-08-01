@@ -1,8 +1,8 @@
 # RegFGW
 
 [![Tests](https://github.com/YuxuanTang2002/RegFGW/actions/workflows/tests.yaml/badge.svg)](https://github.com/YuxuanTang2002/RegFGW/actions/workflows/tests.yaml)
-[![PyPI](https://img.shields.io/pypi/v/regfgw.svg)](https://pypi.org/project/regfgw/)
-[![License](https://img.shields.io/github/license/YuxuanTang2002/RegFGW.svg)](https://github.com/YuxuanTang2002/RegFGW/blob/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/regfgw)](https://pypi.org/project/regfgw/)
+[![License](https://img.shields.io/github/license/YuxuanTang2002/RegFGW)](https://github.com/YuxuanTang2002/RegFGW/blob/main/LICENSE)
 
 ## Overview
 
