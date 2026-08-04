@@ -470,7 +470,7 @@ class RegistryPriorBO:
         sobol = qmc.Sobol(
             d=2,
             scramble=True,
-            seed=self.params.seed,
+            rng=rng,
         )
         initial_points = sobol.random_base2(m)
         initial_failure_counts = {"too_close": 0, "too_far": 0}
