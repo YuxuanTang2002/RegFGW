@@ -1,6 +1,5 @@
 import argparse
 import configargparse
-from tqdm import tqdm
 from typing import List, Dict, Any
 from pymatgen.core import Structure
 from regfgw.interface_construction import InterfaceBuilder, ZSLParams, InterfaceParams
