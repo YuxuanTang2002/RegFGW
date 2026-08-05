@@ -68,7 +68,7 @@ def main():
             bo_params=params,
             structure_check=False,
         )
-        _, records = bo.bayes_optimize_registry(record, shift_c=shift_c)
+        records, _ = bo.bayes_optimize_registry(record, shift_c=shift_c)
         bo_scores = np.asarray(
             [record.score for record in records],
             dtype=float,

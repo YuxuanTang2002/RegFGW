@@ -418,7 +418,7 @@ class RegistryPriorBO:
             dft_gap_offset: float = 0.0,
             shift_c: Optional[float] = None,
             continuity_check: bool = True,
-    ):
+    ) -> tuple[List[BORecord], List[BORecord]]:
         """
         Perform Bayesian optimization over in-plane registry space.
 
@@ -620,4 +620,4 @@ class RegistryPriorBO:
                 traj.write(atoms)
             traj.close()
 
-        return best_record, out_records
+        return records, out_records

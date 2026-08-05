@@ -44,7 +44,7 @@ class InterfaceGroup:
     member_indices: indices of all equivalent structures
     """
     rep_index: int
-    member_indices: Tuple[int]
+    member_indices: Tuple[int, ...]
 
 # -----------------------------------------------------------------------------
 # Interface reduction
