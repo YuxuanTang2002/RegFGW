@@ -67,6 +67,7 @@ def build_parser():
     parser.add_argument("--unique", action="store_true", help="Only output structurally inequivalent registries per interface candidate.")
     parser.add_argument("--out-traj", action="store_true", help="Write BO sampled registries with FGW scores to .traj files.")
     parser.add_argument("--pipeline-check", action="store_true", help="Write intermediate structures for pipeline inspection.")
+    parser.add_argument("--out-dir", required=True, help="Directory for output files")
     return parser
 
 def validate_args(args: argparse.Namespace, parser: configargparse.ArgumentParser):
@@ -175,6 +176,7 @@ def run(args: argparse.Namespace):
         interface_params=interface_params,
     )
     records = interface_builder.sum_interface_records(
+        out_dir=args.out_dir,
         build_bulk_refs=True,
         structure_check = args.mode == "build",
     )
@@ -233,6 +235,7 @@ def run(args: argparse.Namespace):
                     dft_gap_offset=args.dft_gap_offset,
                     shift_c=shift_c,
                     continuity_check=continuity_check,
+                    out_dir=args.out_dir,
                 )
                 break
             except RuntimeError as e:

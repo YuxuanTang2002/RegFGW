@@ -42,6 +42,7 @@ regfgw_coherent \
   --mode build \
   --substrate substrate.cif \
   --film film.cif \
+  --out-dir results
 ```
 
 Construction settings can be specified as needed:
@@ -51,6 +52,7 @@ regfgw_coherent \
   --mode build \
   --substrate substrate.cif \
   --film film.cif \
+  --out-dir results \
   --max-miller-idx 1 \
   --substrate-layers 3 \
   --film-layers 3 \
@@ -59,7 +61,7 @@ regfgw_coherent \
   --zsl-max-area 150.0 \
   --zsl-area-ratio 0.06 \
   --zsl-length 0.03 \
-  --zsl-angle 0.02 \
+  --zsl-angle 0.02 
 ```
 
 ### Registry optimization
@@ -71,8 +73,9 @@ regfgw_coherent \
   --mode optimize \
   --substrate substrate.cif \
   --film film.cif \
+  --out-dir result \
   --embedding embedding.json \
-  --budget 3 \
+  --budget 3 
 ```
 
 The construction arguments above also apply in this mode. Generated interface candidates are displayed for selection before registry optimization.
@@ -91,6 +94,7 @@ Example configuration:
 mode: optimize
 substrate: substrate.cif
 film: film.cif
+out-dir: results
 embedding: embedding.json
 max-miller-idx: 1
 substrate-layers: 3

@@ -332,9 +332,8 @@ class GraphEncoder:
     # -------------------------------------------------------------------------
 
     @staticmethod
-    def build_base_path(interface: Dict[str, Any]):
+    def build_base_path(interface: Dict[str, Any], out_dir):
         """Build a filename stem from interface metadata."""
-        out_dir = "results"
         os.makedirs(out_dir, exist_ok=True)
         s = interface["substrate_miller"]
         f = interface["film_miller"]
@@ -366,6 +365,7 @@ class GraphEncoder:
             interface: Dict[str, Any],
             sub_period_layers: int,
             film_period_layers: int,
+            out_dir,
             structure_check: bool = False,
     ):
         sub_bulk_struct = interface["substrate_bulk"]
@@ -383,7 +383,7 @@ class GraphEncoder:
 
         # Optional debugging dumps
         if structure_check:
-            base_path = self.build_base_path(interface)
+            base_path = self.build_base_path(interface, out_dir)
             self.write_subset_cif(sub_bulk_atoms, sub_bulk_core, base_path, "sub_bulk_core")
             self.write_subset_cif(film_bulk_atoms, film_bulk_core, base_path, "film_bulk_core")
 
@@ -403,6 +403,7 @@ class GraphEncoder:
             interface: Dict[str, Any],
             sub_period_layers: int,
             film_period_layers: int,
+            out_dir,
             structure_check: bool = False,
     ):
         interface_struct: Interface = interface["interface"]
@@ -422,7 +423,7 @@ class GraphEncoder:
 
         # Optional debugging dumps
         if structure_check:
-            base_path = self.build_base_path(interface)
+            base_path = self.build_base_path(interface, out_dir)
             self.write_subset_cif(itf_atoms, sub_pick_global, base_path, "sub_pick_global")
             self.write_subset_cif(itf_atoms, film_pick_global, base_path, "film_pick_global")
 

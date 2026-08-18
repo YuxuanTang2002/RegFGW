@@ -325,8 +325,13 @@ class InterfaceBuilder:
     # -------------------------------------------------------------------------
 
     def get_interface_records(
-            self, substrate_miller, film_miller, term,
-            build_bulk_refs=True, structure_check=False,
+            self,
+            substrate_miller,
+            film_miller,
+            term,
+            out_dir,
+            build_bulk_refs=False,
+            structure_check=False,
             cib: CoherentInterfaceBuilder | None = None,
     ):
         """
@@ -426,7 +431,6 @@ class InterfaceBuilder:
 
         # Optional structure dump for debugging
         if structure_check:
-            out_dir = "results"
             os.makedirs(out_dir, exist_ok=True)
             for rec in records:
                 s = rec["substrate_miller"]
@@ -454,7 +458,12 @@ class InterfaceBuilder:
 
         return records
 
-    def sum_interface_records(self, build_bulk_refs=False, structure_check=False):
+    def sum_interface_records(
+            self,
+            out_dir,
+            build_bulk_refs=False,
+            structure_check=False
+    ):
         """
         Enumerate all (substrate_miller, film_miller, termination) combinations and aggregate candidate records.
 
@@ -472,6 +481,7 @@ class InterfaceBuilder:
                 for term in cib.terminations:
                     recs = self.get_interface_records(
                         s_idx, f_idx, term,
+                        out_dir=out_dir,
                         build_bulk_refs=build_bulk_refs,
                         structure_check=structure_check,
                         cib=cib,

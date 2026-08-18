@@ -351,6 +351,7 @@ class RegistryPriorBO:
     def score_registry(
             self,
             interface: Dict[str, Any],
+            out_dir,
             shift_a: float = 0.0,
             shift_b: float = 0.0,
             shift_c: float = 0.0,
@@ -379,6 +380,7 @@ class RegistryPriorBO:
                 sub_period_layers=interface["sub_period_layers"],
                 film_period_layers=interface["film_period_layers"],
                 structure_check=structure_check,
+                out_dir=out_dir,
             )
 
         base_itf = interface["interface"]
@@ -397,6 +399,7 @@ class RegistryPriorBO:
             sub_period_layers=interface["sub_period_layers"],
             film_period_layers=interface["film_period_layers"],
             structure_check=structure_check,
+            out_dir=out_dir,
         )
         score = self.scorer.score_with_fgw(
             (g_itf_sub, self.g_sub_bulk),
@@ -412,6 +415,7 @@ class RegistryPriorBO:
     def bayes_optimize_registry(
             self,
             interface: Dict[str, Any],
+            out_dir,
             budget: int = 3,
             unique: bool = False,
             out_traj: bool = False,
@@ -463,7 +467,13 @@ class RegistryPriorBO:
         if self.structure_check:
             self.g_sub_bulk = None
             self.g_film_bulk = None
-            self.score_registry(interface, shift_c=shift_c, structure_check=True, continuity_check=continuity_check)
+            self.score_registry(
+                interface,
+                shift_c=shift_c,
+                structure_check=True,
+                continuity_check=continuity_check,
+                out_dir=out_dir,
+            )
 
         total_steps = self.params.n_init + self.params.n_iter
         m = int(np.log2(self.params.n_init))
@@ -486,6 +496,7 @@ class RegistryPriorBO:
                     shift_b=shift_b, 
                     shift_c=shift_c,
                     continuity_check=continuity_check,
+                    out_dir=out_dir,
                 )
                 if continuity_status in initial_failure_counts:
                     initial_failure_counts[continuity_status] += 1
@@ -554,6 +565,7 @@ class RegistryPriorBO:
                     shift_b=shift_b, 
                     shift_c=shift_c,
                     continuity_check=continuity_check,
+                    out_dir=out_dir,
                 )
                 if continuity_status in refinement_failure_counts:
                     refinement_failure_counts[continuity_status] += 1
@@ -603,7 +615,7 @@ class RegistryPriorBO:
             )
 
         out_records = out_records[:budget]
-        base_path = self.enc.build_base_path(interface)
+        base_path = self.enc.build_base_path(interface, out_dir)
 
         for out_idx, record in enumerate(out_records):
             registry = self.shift_film(record.registry, shift_c=dft_gap_offset)
