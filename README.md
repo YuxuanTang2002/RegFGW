@@ -3,6 +3,7 @@
 [![Tests](https://github.com/YuxuanTang2002/RegFGW/actions/workflows/tests.yaml/badge.svg)](https://github.com/YuxuanTang2002/RegFGW/actions/workflows/tests.yaml)
 [![PyPI](https://img.shields.io/pypi/v/regfgw)](https://pypi.org/project/regfgw/)
 [![License](https://img.shields.io/github/license/YuxuanTang2002/RegFGW)](https://github.com/YuxuanTang2002/RegFGW/blob/main/LICENSE)
+[![arXiv](https://img.shields.io/badge/arXiv-2608.19933-b31b1b.svg)](https://arxiv.org/abs/2608.19933)
 
 ## Overview
 
@@ -112,7 +113,19 @@ Structures, calculated results and analysis notebooks are provided in [`examples
 
 ## Citation
 
-Please cite the RegFGW software repository until the associated publication is available.
+If you use RegFGW in your research, please cite our paper:
+
+```bibtex
+@misc{tang2026heterointerfaces, 
+      title={Building atomistic models of heterointerfaces with optimal transport}, 
+      author={Yuxuan Tang and Keith T. Butler},
+      year={2026},
+      eprint={2608.19933},
+      archivePrefix={arXiv},
+      primaryClass={cond-mat.mtrl-sci},
+      url={https://arxiv.org/abs/2608.19933}, 
+}
+```
 
 ## License
 This project is licensed under the [MIT License](LICENSE).
