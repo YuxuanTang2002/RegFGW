@@ -1,8 +1,8 @@
 # RegFGW
 
 [![Tests](https://github.com/YuxuanTang2002/RegFGW/actions/workflows/tests.yaml/badge.svg)](https://github.com/YuxuanTang2002/RegFGW/actions/workflows/tests.yaml)
-[![PyPI](https://img.shields.io/pypi/v/regfgw)](https://pypi.org/project/regfgw/)
-[![License](https://img.shields.io/github/license/YuxuanTang2002/RegFGW)](https://github.com/YuxuanTang2002/RegFGW/blob/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/regfgw?label=PyPI)](https://pypi.org/project/regfgw/)
+[![License](https://img.shields.io/github/license/YuxuanTang2002/RegFGW?label=License)](https://github.com/YuxuanTang2002/RegFGW/blob/main/LICENSE)
 [![arXiv](https://img.shields.io/badge/arXiv-2608.19933-b31b1b.svg)](https://arxiv.org/abs/2608.19933)
 
 RegFGW is a graph-based framework for pre-screening atomic interface registries before expensive structural relaxation. 
