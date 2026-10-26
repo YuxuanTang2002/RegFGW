@@ -5,8 +5,6 @@
 [![License](https://img.shields.io/github/license/YuxuanTang2002/RegFGW)](https://github.com/YuxuanTang2002/RegFGW/blob/main/LICENSE)
 [![arXiv](https://img.shields.io/badge/arXiv-2608.19933-b31b1b.svg)](https://arxiv.org/abs/2608.19933)
 
-## Overview
-
 RegFGW is a graph-based framework for pre-screening atomic interface registries before expensive structural relaxation. 
 It uses the fused Gromov–Wasserstein (FGW) distance to quantify the structural deviation of each registry from its corresponding bulk reference. 
 Bayesian optimization is then used to efficiently explore the registry space. 
